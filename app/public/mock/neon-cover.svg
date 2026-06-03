@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 900" role="img" aria-label="NEON cover">
+  <rect width="680" height="900" fill="#10131a"/>
+  <circle cx="520" cy="180" r="160" fill="#18b7a4" opacity="0.8"/>
+  <path d="M0 700 C180 560 300 820 680 610 L680 900 L0 900 Z" fill="#ff4d6d" opacity="0.86"/>
+  <path d="M80 110 L600 110 L600 790 L80 790 Z" fill="none" stroke="#fff" stroke-width="18" opacity="0.18"/>
+  <text x="72" y="760" fill="#fff" font-family="Arial, sans-serif" font-size="78" font-weight="800" letter-spacing="6">NEON</text>
+</svg>

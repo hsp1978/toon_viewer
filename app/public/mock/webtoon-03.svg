@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 3900" role="img" aria-label="ROOFTOP comic page">
+  <rect width="900" height="3900" fill="#181915"/>
+  <rect x="36" y="36" width="828" height="3828" rx="20" fill="none" stroke="#111" stroke-width="8" opacity="0.18"/>
+  <rect x="70" y="90" width="760" height="720" rx="24" fill="#8bd17c" opacity="0.78"/>
+  <circle cx="220" cy="480" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="870" width="760" height="720" rx="24" fill="#c44536" opacity="0.64"/>
+  <circle cx="400" cy="1260" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="1650" width="760" height="720" rx="24" fill="#8bd17c" opacity="0.78"/>
+  <circle cx="580" cy="2040" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="2430" width="760" height="720" rx="24" fill="#c44536" opacity="0.64"/>
+  <circle cx="220" cy="2820" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="3210" width="760" height="720" rx="24" fill="#8bd17c" opacity="0.78"/>
+  <circle cx="400" cy="3600" r="82" fill="#fff" opacity="0.18"/>
+  <text x="70" y="3808" fill="#8bd17c" font-family="Arial, sans-serif" font-size="64" font-weight="800" letter-spacing="4">ROOFTOP</text>
+</svg>

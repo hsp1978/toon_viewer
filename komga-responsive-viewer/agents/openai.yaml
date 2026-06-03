@@ -1,0 +1,4 @@
+interface:
+  display_name: "Komga Responsive Viewer"
+  short_description: "Build responsive Komga comic readers"
+  default_prompt: "Use $komga-responsive-viewer to plan or implement a responsive Komga-backed webtoon and comic reader."

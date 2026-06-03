@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 3600" role="img" aria-label="RAINLINE comic page">
+  <rect width="900" height="3600" fill="#12141b"/>
+  <rect x="36" y="36" width="828" height="3528" rx="20" fill="none" stroke="#111" stroke-width="8" opacity="0.18"/>
+  <rect x="70" y="90" width="760" height="660" rx="24" fill="#16b3a5" opacity="0.78"/>
+  <circle cx="220" cy="450" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="810" width="760" height="660" rx="24" fill="#ff4d6d" opacity="0.64"/>
+  <circle cx="400" cy="1170" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="1530" width="760" height="660" rx="24" fill="#16b3a5" opacity="0.78"/>
+  <circle cx="580" cy="1890" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="2250" width="760" height="660" rx="24" fill="#ff4d6d" opacity="0.64"/>
+  <circle cx="220" cy="2610" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="2970" width="760" height="660" rx="24" fill="#16b3a5" opacity="0.78"/>
+  <circle cx="400" cy="3330" r="82" fill="#fff" opacity="0.18"/>
+  <text x="70" y="3508" fill="#16b3a5" font-family="Arial, sans-serif" font-size="64" font-weight="800" letter-spacing="4">RAINLINE</text>
+</svg>

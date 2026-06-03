@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1800" role="img" aria-label="CHASE comic page">
+  <rect width="1200" height="1800" fill="#f8f4ea"/>
+  <rect x="36" y="36" width="1128" height="1728" rx="20" fill="none" stroke="#111" stroke-width="8" opacity="0.18"/>
+  
+  <rect x="70" y="80" width="1060" height="504" rx="18" fill="#2e6cff" opacity="0.82"/>
+  <rect x="70" y="684" width="499" height="468" rx="18" fill="#e5a72f" opacity="0.78"/>
+  <rect x="636" y="684" width="488" height="468" rx="18" fill="#2e6cff" opacity="0.42"/>
+  <rect x="70" y="1296" width="1060" height="324" rx="18" fill="#e5a72f" opacity="0.52"/>
+  <circle cx="936" cy="360" r="96" fill="#fff" opacity="0.34"/>
+
+  <text x="70" y="1708" fill="#2e6cff" font-family="Arial, sans-serif" font-size="85" font-weight="800" letter-spacing="4">CHASE</text>
+</svg>

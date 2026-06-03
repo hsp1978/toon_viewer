@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  komga:
+    image: gotson/komga:1.24.4
+    container_name: panelshift-komga
+    restart: unless-stopped
+    ports:
+      - "${KOMGA_BIND_ADDRESS:-127.0.0.1}:25600:25600"
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+    volumes:
+      - ./komga/config:/config
+      - ./library:/data

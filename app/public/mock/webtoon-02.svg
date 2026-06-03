@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 3300" role="img" aria-label="SIGNAL comic page">
+  <rect width="900" height="3300" fill="#15181f"/>
+  <rect x="36" y="36" width="828" height="3228" rx="20" fill="none" stroke="#111" stroke-width="8" opacity="0.18"/>
+  <rect x="70" y="90" width="760" height="600" rx="24" fill="#f0b429" opacity="0.78"/>
+  <circle cx="220" cy="420" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="750" width="760" height="600" rx="24" fill="#2e6cff" opacity="0.64"/>
+  <circle cx="400" cy="1080" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="1410" width="760" height="600" rx="24" fill="#f0b429" opacity="0.78"/>
+  <circle cx="580" cy="1740" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="2070" width="760" height="600" rx="24" fill="#2e6cff" opacity="0.64"/>
+  <circle cx="220" cy="2400" r="82" fill="#fff" opacity="0.18"/>
+  <rect x="70" y="2730" width="760" height="600" rx="24" fill="#f0b429" opacity="0.78"/>
+  <circle cx="400" cy="3060" r="82" fill="#fff" opacity="0.18"/>
+  <text x="70" y="3208" fill="#f0b429" font-family="Arial, sans-serif" font-size="64" font-weight="800" letter-spacing="4">SIGNAL</text>
+</svg>

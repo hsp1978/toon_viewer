@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.env
+.env*.local
+app/.env.local
+app/.next/
+app/node_modules/
+komga/config/*
+!komga/config/.gitkeep
+library/*
+!library/.gitkeep

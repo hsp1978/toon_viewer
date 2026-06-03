@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 1650" role="img" aria-label="POND comic page">
+  <rect width="1100" height="1650" fill="#fbfaf7"/>
+  <rect x="36" y="36" width="1028" height="1578" rx="20" fill="none" stroke="#111" stroke-width="8" opacity="0.18"/>
+  
+  <rect x="70" y="80" width="960" height="462" rx="18" fill="#20251f" opacity="0.82"/>
+  <rect x="70" y="627" width="451" height="429" rx="18" fill="#d7a4ff" opacity="0.78"/>
+  <rect x="583" y="627" width="441" height="429" rx="18" fill="#20251f" opacity="0.42"/>
+  <rect x="70" y="1188" width="960" height="297" rx="18" fill="#d7a4ff" opacity="0.52"/>
+  <circle cx="858" cy="330" r="88" fill="#fff" opacity="0.34"/>
+
+  <text x="70" y="1558" fill="#20251f" font-family="Arial, sans-serif" font-size="78" font-weight="800" letter-spacing="4">POND</text>
+</svg>

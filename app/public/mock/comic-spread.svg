@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1200" role="img" aria-label="SPREAD comic page">
+  <rect width="1800" height="1200" fill="#f7f0e5"/>
+  <rect x="36" y="36" width="1728" height="1128" rx="20" fill="none" stroke="#111" stroke-width="8" opacity="0.18"/>
+  
+  <rect x="70" y="80" width="1660" height="336" rx="18" fill="#15191d" opacity="0.82"/>
+  <rect x="70" y="456" width="787" height="312" rx="18" fill="#e5a72f" opacity="0.78"/>
+  <rect x="954" y="456" width="770" height="312" rx="18" fill="#15191d" opacity="0.42"/>
+  <rect x="70" y="864" width="1660" height="216" rx="18" fill="#e5a72f" opacity="0.52"/>
+  <circle cx="1404" cy="240" r="96" fill="#fff" opacity="0.34"/>
+
+  <text x="70" y="1108" fill="#15191d" font-family="Arial, sans-serif" font-size="96" font-weight="800" letter-spacing="4">SPREAD</text>
+</svg>
