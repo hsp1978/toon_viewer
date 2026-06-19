@@ -10,6 +10,7 @@ import {
   Clock,
   Database,
   Grid2X2,
+  House,
   LibraryBig,
   List,
   Loader2,
@@ -20,6 +21,7 @@ import {
 import Image from "next/image";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { appUrl } from "@/lib/app-url";
 import type { Book, CatalogOverview, CatalogSource, ReaderMode, Series } from "@/lib/types";
 import { Reader } from "./reader";
 
@@ -146,7 +148,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   const [selectedBookId, setSelectedBookId] = useState("");
   const [modeOverride, setModeOverride] = useState<ReaderMode>("auto");
   const [query, setQuery] = useState("");
-  const [seriesViewMode, setSeriesViewMode] = useState<SeriesViewMode>("grid");
+  const [seriesViewMode, setSeriesViewMode] = useState<SeriesViewMode>("list");
   const [seriesSortMode, setSeriesSortMode] = useState<SeriesSortMode>("latest");
   const [readerStartPage, setReaderStartPage] = useState(0);
   const [view, setView] = useState<AppView>("browse");
@@ -221,7 +223,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
       });
 
       try {
-        const response = await fetch(`/api/komga/series/${encodeURIComponent(seriesId)}/books`, { cache: "no-store" });
+        const response = await fetch(appUrl(`/api/komga/series/${encodeURIComponent(seriesId)}/books`), { cache: "no-store" });
         const payload = (await response.json()) as { books?: Book[]; error?: string; warning?: string };
         if (!response.ok) {
           throw new Error(payload.error ?? `Series books returned ${response.status}`);
@@ -367,6 +369,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
           initialPageIndex={readerStartPage}
           modeOverride={modeOverride}
           onBack={() => setView("series")}
+          onHome={() => setView("browse")}
           onModeOverrideChange={setModeOverride}
           onProgressChange={handleReaderProgressChange}
           onNextBook={nextBook ? () => openBook(nextBook) : undefined}
@@ -429,7 +432,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                   alt={`${featuredSeries.title} cover`}
                   className="featureCover"
                   height={220}
-                  src={featuredSeries.coverSrc}
+                  src={appUrl(featuredSeries.coverSrc)}
                   unoptimized
                   width={160}
                 />
@@ -547,7 +550,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                           alt={`${item.title} cover`}
                           className="posterCover"
                           height={256}
-                          src={item.coverSrc}
+                          src={appUrl(item.coverSrc)}
                           unoptimized
                           width={192}
                         />
@@ -582,10 +585,16 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
         </div>
       ) : (
         <div className="contentShell detailShell">
-          <button className="detailBack" onClick={() => setView("browse")} type="button">
-            <ChevronLeft size={20} />
-            책장
-          </button>
+          <div className="detailTopNav">
+            <button className="detailBack" onClick={() => setView("browse")} type="button">
+              <ChevronLeft size={20} />
+              책장
+            </button>
+            <button className="detailBack" onClick={() => setView("browse")} type="button">
+              <House size={20} />
+              홈
+            </button>
+          </div>
 
           <section className="seriesDetail" aria-label="Series detail">
             <div className="detailCoverFrame">
@@ -593,7 +602,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                 alt={`${selectedSeries.title} cover`}
                 className="detailCover"
                 height={360}
-                src={selectedSeries.coverSrc}
+                src={appUrl(selectedSeries.coverSrc)}
                 unoptimized
                 width={260}
               />

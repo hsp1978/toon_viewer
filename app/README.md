@@ -54,3 +54,20 @@ npm run start:local
 ```
 
 Use `npm run start:lan` only for a trusted LAN/Tailscale deployment. For internet access, put the app behind an authenticated reverse proxy or tunnel instead of opening inbound ports directly.
+
+## Android wrapper
+
+The existing Next.js service remains the runtime backend. The Capacitor Android project loads that service through `CAPACITOR_SERVER_URL`, so Komga secrets stay on the server side.
+
+```bash
+CAPACITOR_SERVER_URL=https://your-panelshift.example.com npm run mobile:sync
+npm run mobile:build:android
+```
+
+For local LAN testing, HTTP is allowed automatically when `CAPACITOR_SERVER_URL` starts with `http://`:
+
+```bash
+CAPACITOR_SERVER_URL=http://192.168.1.20:3001 npm run mobile:run:android
+```
+
+If you need the WebView bundle to call a different API origin later, build the web app with `NEXT_PUBLIC_API_BASE_URL` set to that origin. When unset, the web service keeps using relative `/api/...` routes.

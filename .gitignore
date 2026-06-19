@@ -10,3 +10,8 @@ komga/config/*
 !komga/config/.gitkeep
 library/*
 !library/.gitkeep
+
+# Capacitor generated native project & web wrapper (not committed)
+app/android/
+app/capacitor-web/
+*.apk

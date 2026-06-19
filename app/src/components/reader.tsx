@@ -3,9 +3,12 @@
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronsDown,
   ChevronsLeft,
   ChevronsRight,
+  ChevronsUp,
   Columns2,
+  House,
   List,
   Maximize2,
   Minus,
@@ -16,6 +19,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { appUrl } from "@/lib/app-url";
 import { clampPageIndex, getPagedWindow, inferReaderMode } from "@/lib/reader-mode";
 import type { Book, ComicPage, ReaderMode, Series } from "@/lib/types";
 
@@ -29,6 +33,7 @@ type ReaderProps = {
   onModeOverrideChange: (mode: ReaderMode) => void;
   onProgressChange?: (update: ReaderProgressUpdate) => void;
   onBack?: () => void;
+  onHome?: () => void;
   onNextBook?: () => void;
   onPreviousBook?: () => void;
 };
@@ -43,6 +48,7 @@ export function Reader({
   onModeOverrideChange,
   onProgressChange,
   onBack,
+  onHome,
   onNextBook,
   onPreviousBook,
 }: ReaderProps) {
@@ -70,7 +76,7 @@ export function Reader({
 
     async function loadPages() {
       try {
-        const response = await fetch(`/api/komga/books/${encodeURIComponent(book.id)}/pages`, { cache: "no-store" });
+        const response = await fetch(appUrl(`/api/komga/books/${encodeURIComponent(book.id)}/pages`), { cache: "no-store" });
         const payload = (await response.json()) as { pages?: ComicPage[]; error?: string };
         if (!response.ok) {
           throw new Error(payload.error ?? `Page metadata returned ${response.status}`);
@@ -240,7 +246,7 @@ export function Reader({
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void fetch(`/api/komga/books/${encodeURIComponent(book.id)}/progress`, {
+      void fetch(appUrl(`/api/komga/books/${encodeURIComponent(book.id)}/progress`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -269,6 +275,12 @@ export function Reader({
               <button className="readerBackButton" onClick={onBack} type="button">
                 <ChevronLeft size={20} />
                 작품
+              </button>
+            ) : null}
+            {onHome ? (
+              <button className="readerBackButton" onClick={onHome} type="button">
+                <House size={20} />
+                홈
               </button>
             ) : null}
             <div className="readerTitleBlock">
@@ -300,6 +312,12 @@ export function Reader({
             <button className="readerBackButton" onClick={onBack} type="button">
               <ChevronLeft size={20} />
               작품
+            </button>
+          ) : null}
+          {onHome ? (
+            <button className="readerBackButton" onClick={onHome} type="button">
+              <House size={20} />
+              홈
             </button>
           ) : null}
           <div className="readerTitleBlock">
@@ -420,7 +438,7 @@ export function Reader({
                 className="webtoonPage"
                 height={page.height}
                 loading={page.index === 0 ? "eager" : "lazy"}
-                src={page.src}
+                src={appUrl(page.src)}
                 unoptimized
                 width={page.width}
               />
@@ -442,7 +460,7 @@ export function Reader({
                 height={page.height}
                 key={page.index}
                 loading="eager"
-                src={page.src}
+                src={appUrl(page.src)}
                 unoptimized
                 width={page.width}
               />
@@ -450,6 +468,32 @@ export function Reader({
           </div>
         </div>
       )}
+
+      <div
+        aria-hidden={!bottomNavVisible}
+        className={`readerSideRail ${bottomNavVisible ? "visible" : "hidden"}`}
+      >
+        <button
+          aria-label="맨 위로"
+          className="sideRailButton"
+          disabled={!canGoPrevious}
+          onClick={() => setReaderIndex(0)}
+          title="맨 위로"
+          type="button"
+        >
+          <ChevronsUp size={20} />
+        </button>
+        <button
+          aria-label="맨 아래로"
+          className="sideRailButton"
+          disabled={!canGoNext}
+          onClick={() => setReaderIndex(pages.length - 1)}
+          title="맨 아래로"
+          type="button"
+        >
+          <ChevronsDown size={20} />
+        </button>
+      </div>
 
       <nav
         aria-hidden={!bottomNavVisible}
@@ -463,6 +507,10 @@ export function Reader({
         <button className="bottomNavButton" disabled={!canGoPrevious} onClick={goPrevious} type="button">
           <ChevronLeft size={18} />
           이전
+        </button>
+        <button className="bottomNavButton" disabled={!onHome} onClick={onHome} type="button">
+          <House size={18} />
+          홈
         </button>
         <button className="bottomEpisodeButton" disabled={!onBack} onClick={onBack} type="button">
           <List size={18} />

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Panelshift">
+  <rect width="512" height="512" rx="112" fill="#151713"/>
+  <path d="M122 116h184c52 0 92 40 92 91v98c0 51-40 91-92 91H122V116Z" fill="#f8faf4"/>
+  <path d="M166 166h118c36 0 64 28 64 64v52c0 36-28 64-64 64H166V166Z" fill="#0f766e"/>
+  <path d="M201 207h84c13 0 24 11 24 24v50c0 13-11 24-24 24h-84V207Z" fill="#151713"/>
+  <path d="M333 156h46c8 0 15 7 15 15v171c0 8-7 15-15 15h-46c23-20 38-49 38-81v-39c0-32-15-61-38-81Z" fill="#e5a72f"/>
+  <path d="M122 396h186c29 0 56-10 77-27l-28 58c-6 12-18 19-31 19H122v-50Z" fill="#b84a3a"/>
+</svg>
