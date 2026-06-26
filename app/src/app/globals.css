@@ -1123,6 +1123,91 @@ progress::-moz-progress-bar {
   opacity: 0.35;
 }
 
+@media (min-width: 1024px) {
+  /* Reader chrome was built for phones; adapt it for wide desktop viewports.
+     Everything here is desktop-only so the mobile/Capacitor layout is untouched. */
+
+  /* Catalog: use the horizontal space instead of a single sparse column */
+  .seriesShelf.gridView {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+
+  .seriesShelf.listView {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .seriesDetail {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+
+  /* Constrain & center the top toolbar + controls instead of stretching edge-to-edge */
+  .readerToolbar,
+  .readerControls {
+    width: 100%;
+    max-width: 1180px;
+    margin-inline: auto;
+  }
+
+  /* Give the comic real estate instead of a small panel in a sea of black */
+  .pagedSpread {
+    max-width: 1400px;
+  }
+
+  .pagedSpread.singleUp {
+    grid-template-columns: minmax(0, 860px);
+  }
+
+  .pagedPage {
+    max-height: calc(100vh - 240px);
+  }
+
+  .webtoonPage,
+  .webtoonPageAnchor {
+    width: min(var(--reader-zoom), 1000px);
+  }
+
+  /* Turn the full-width mobile tab bar into a centered floating control cluster */
+  .readerBottomBar {
+    left: 50%;
+    right: auto;
+    width: auto;
+    max-width: min(960px, calc(100% - 48px));
+    bottom: 20px;
+    grid-template-columns: repeat(6, minmax(0, max-content));
+    gap: 10px;
+    padding: 10px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    transform: translateX(-50%);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+
+  .readerBottomBar.hidden {
+    transform: translate(-50%, calc(100% + 28px));
+  }
+
+  .bottomNavButton,
+  .bottomEpisodeButton {
+    padding: 0 16px;
+  }
+
+  /* Desktop has keyboard nav (←/→/Home/End) + scroll, so drop the floating rail */
+  .readerSideRail {
+    display: none;
+  }
+}
+
+@media (min-width: 1440px) {
+  /* Wider screens get a wider content column and denser catalog layout */
+  .contentShell {
+    width: min(1440px, 100%);
+  }
+
+  .seriesShelf.listView {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 980px) {
   .browseHero,
   .seriesDetail {

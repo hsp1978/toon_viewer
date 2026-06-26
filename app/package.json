@@ -25,11 +25,13 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.6",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "^1.61.1",
     "typescript": "^5"
   },
   "overrides": {
