@@ -28,13 +28,40 @@ const mockCatalogOverview: CatalogOverview = {
   series: mockCatalog.series,
 };
 
+function normalizeCatalogMode(value: string | undefined) {
+  const mode = value?.trim().toLowerCase();
+  return mode === "mock" || mode === "komga" ? mode : undefined;
+}
+
+/**
+ * Resolves mock vs. live catalog mode.
+ *
+ * `CATALOG_MODE` is read at runtime, so it can be corrected with a restart.
+ * `NEXT_PUBLIC_CATALOG_MODE` is inlined at build time by Next, which means a
+ * build done without the right env file bakes the wrong mode in permanently.
+ * It is still honoured for existing setups, but the runtime value always wins
+ * so a bad build can be recovered without rebuilding.
+ */
+export function resolveCatalogMode(): "mock" | "komga" {
+  const runtime = normalizeCatalogMode(process.env.CATALOG_MODE);
+  if (runtime) return runtime;
+
+  const buildTime = normalizeCatalogMode(process.env.NEXT_PUBLIC_CATALOG_MODE);
+  if (buildTime) return buildTime;
+
+  // No explicit mode: infer from whether Komga is actually configured, so a
+  // missing env file degrades to an obvious connection error rather than
+  // silently serving mock data that looks like a working library.
+  return process.env.KOMGA_BASE_URL?.trim() ? "komga" : "mock";
+}
+
 export function getKomgaConfig(): KomgaConfig {
   return {
     baseUrl: process.env.KOMGA_BASE_URL,
     apiKey: process.env.KOMGA_API_KEY,
     username: process.env.KOMGA_USERNAME,
     password: process.env.KOMGA_PASSWORD,
-    forceMock: process.env.NEXT_PUBLIC_CATALOG_MODE === "mock" || process.env.KOMGA_FORCE_MOCK === "true",
+    forceMock: resolveCatalogMode() === "mock" || process.env.KOMGA_FORCE_MOCK === "true",
     maxListPages: Number(process.env.KOMGA_MAX_LIST_PAGES ?? 20),
     bootstrapBookLimit: Number(process.env.KOMGA_BOOTSTRAP_BOOK_LIMIT ?? 40),
   };
@@ -445,10 +472,21 @@ export async function checkKomgaConnection() {
 
   try {
     const response = await komgaFetch("/api/v1/libraries", {}, config);
+
+    // Reaching /libraries only proves the credentials work. A deploy can still
+    // be pointed at an empty or wrong Komga, so confirm real content is
+    // visible — that is what makes this usable as a deploy gate.
+    const libraries = getContentArray(await response.clone().json().catch(() => []));
+    const seriesPage = await getJson("/api/v1/series?size=1", config);
+    const totalSeries = isRecord(seriesPage) ? getNumber(seriesPage.totalElements, 0) : 0;
+
     return {
-      ok: response.ok,
+      ok: response.ok && totalSeries > 0,
       mode: "komga" as const,
       status: response.status,
+      libraries: libraries.length,
+      series: totalSeries,
+      ...(totalSeries === 0 ? { warning: "Komga is reachable but exposes no series" } : {}),
     };
   } catch (error) {
     return {

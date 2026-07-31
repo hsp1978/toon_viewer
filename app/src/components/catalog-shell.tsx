@@ -25,6 +25,7 @@ import Image from "next/image";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { appUrl } from "@/lib/app-url";
+import { loadAdminToken, saveAdminToken } from "@/lib/admin-token";
 import { loadHiddenSeries, saveHiddenSeries } from "@/lib/hidden-series";
 import type { Book, CatalogOverview, CatalogSource, ReaderMode, Series } from "@/lib/types";
 import { Reader } from "./reader";
@@ -163,11 +164,13 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   const [deletedSeriesIds, setDeletedSeriesIds] = useState<Set<string>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Series | null>(null);
+  const [adminToken, setAdminToken] = useState("");
   const [deletingSeriesId, setDeletingSeriesId] = useState("");
   const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     setHiddenSeriesIds(new Set(loadHiddenSeries()));
+    setAdminToken(loadAdminToken());
   }, []);
 
   const selectedLibrary = catalog.libraries.find((item) => item.id === selectedLibraryId) ?? catalog.libraries[0];
@@ -353,17 +356,35 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   async function confirmDeleteSeries() {
     if (!pendingDelete) return;
     const seriesId = pendingDelete.id;
+    const token = adminToken.trim();
+
+    if (!token) {
+      setDeleteError("관리자 토큰을 입력해 주세요.");
+      return;
+    }
+
     setDeletingSeriesId(seriesId);
     setDeleteError("");
 
     try {
       const response = await fetch(appUrl(`/api/komga/series/${encodeURIComponent(seriesId)}`), {
         method: "DELETE",
+        headers: { "X-Admin-Token": token },
       });
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
+        if (response.status === 403) {
+          saveAdminToken("");
+          throw new Error("관리자 토큰이 올바르지 않습니다.");
+        }
+        if (response.status === 503) {
+          throw new Error("서버에 ADMIN_TOKEN이 설정되지 않아 삭제가 비활성화되어 있습니다.");
+        }
         throw new Error(payload.error ?? `Delete returned ${response.status}`);
       }
+
+      // Only remember a token the server has actually accepted.
+      saveAdminToken(token);
 
       setDeletedSeriesIds((current) => new Set(current).add(seriesId));
       setSeriesHidden(seriesId, false);
@@ -841,6 +862,17 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
             <p className="modalHint">
               지우지 않고 목록에서만 감추려면 취소 후 <EyeOff size={13} /> 숨기기를 사용하세요.
             </p>
+            <label className="modalField">
+              <span>관리자 토큰</span>
+              <input
+                autoComplete="off"
+                disabled={Boolean(deletingSeriesId)}
+                onChange={(event) => setAdminToken(event.target.value)}
+                placeholder="서버의 ADMIN_TOKEN"
+                type="password"
+                value={adminToken}
+              />
+            </label>
             {deleteError ? <p className="modalError">{deleteError}</p> : null}
             <div className="modalActions">
               <button

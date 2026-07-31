@@ -126,7 +126,8 @@ forceMock:"true"===process.env.KOMGA_FORCE_MOCK
 
 | 변수 | 시점 | 비고 |
 |---|---|---|
-| `NEXT_PUBLIC_CATALOG_MODE` | **빌드** | 바꾸려면 재빌드 필수 |
+| **`CATALOG_MODE`** | 런타임 | **권장.** `komga` / `mock`. 아래 `NEXT_PUBLIC_` 값을 항상 이깁니다 |
+| `NEXT_PUBLIC_CATALOG_MODE` | **빌드** | 레거시. 바꾸려면 재빌드 필요 |
 | `NEXT_PUBLIC_API_BASE_URL` | **빌드** | 미설정 시 상대 경로 `/api/...` 사용 |
 | `KOMGA_BASE_URL` | 런타임 | 재시작만으로 반영 |
 | `KOMGA_API_KEY` | 런타임 | 재시작만으로 반영 |
@@ -134,8 +135,25 @@ forceMock:"true"===process.env.KOMGA_FORCE_MOCK
 | `KOMGA_FORCE_MOCK` | 런타임 | 런타임 mock 스위치 |
 | `KOMGA_MAX_LIST_PAGES` | 런타임 | 카탈로그 조회 페이지 수 |
 | `KOMGA_BOOTSTRAP_BOOK_LIMIT` | 런타임 | 페이지 크기 선반영 대상 수 |
+| **`ADMIN_TOKEN`** | 런타임 | 시리즈 삭제에 필수. 미설정이면 삭제가 503으로 거부됩니다 (9.1절) |
 
 **규칙: 빌드 전에 `.env.local`을 먼저 배치하세요.** 순서를 지키는 것만으로 이 함정 전체를 피할 수 있습니다.
+
+### 3.1.1 mock으로 구워졌을 때의 응급 복구
+
+`CATALOG_MODE`가 런타임에 읽히므로, 잘못 구워진 빌드도 **재빌드 없이** 되살릴 수 있습니다. 실제로 검증한 동작입니다.
+
+```bash
+# mock이 구워진 빌드를 그대로 기동 → mock
+curl -s localhost:3001/api/komga/health
+# {"ok":true,"mode":"mock"}
+
+# 같은 빌드에 CATALOG_MODE만 주입 → komga 로 복구
+CATALOG_MODE=komga <기동 명령>
+# {"ok":true,"mode":"komga","status":200,"libraries":1,"series":218}
+```
+
+유닛에 적용하려면 `Environment=CATALOG_MODE=komga` 한 줄을 넣고 재시작하면 됩니다. 다만 이건 응급 처치이고, 정상 경로는 `.env.local`을 갖춘 뒤 재빌드하는 것입니다.
 
 ### 3.2 시크릿 전달 방법
 
@@ -474,10 +492,17 @@ systemctl --user is-active panelshift            # → active
 # 2. 포트 바인딩 (의도한 주소인지)
 ss -tlnp | grep 3001                             # → 100.114.4.40:3001
 
-# 3. Komga 연결 + 모드 확인  ★ 가장 중요
+# 3. Komga 연결 + 모드 + 실제 콘텐츠 확인  ★ 가장 중요
 curl -s http://$HOST:3001/api/komga/health
-# 기대값: {"ok":true,"mode":"komga","status":200}
-# mode가 "mock"이면 3장 함정에 빠진 것입니다 → .env.local 배치 후 재빌드
+# 기대값: {"ok":true,"mode":"komga","status":200,"libraries":1,"series":218}
+# - mode가 "mock"      → 3장 함정. .env.local 배치 후 재빌드 (또는 3.1.1 응급 복구)
+# - series가 0         → ok:false 로 내려옵니다. 빈 Komga를 보고 있다는 뜻
+# 헬스체크는 인증 통과뿐 아니라 실제 시리즈가 보이는지까지 확인하므로
+# 배포 게이트로 그대로 쓸 수 있습니다.
+
+# 3-1. 삭제 보호가 살아있는지 (파일을 지우지 않는 안전한 확인)
+curl -s -o /dev/null -w "토큰 없이 삭제 -> %{http_code} (403 또는 503 이어야 정상)\n" \
+  -X DELETE "http://$HOST:3001/api/komga/series/NONEXISTENT"
 
 # 4. 페이지 렌더링
 curl -s -o /dev/null -w "%{http_code}\n" http://$HOST:3001/     # → 200
@@ -509,6 +534,28 @@ loginctl show-user $USER --property=Linger        # → Linger=yes
 | 폰에서 접속 불가 | `127.0.0.1` 바인딩 | `--hostname`을 Tailscale IP 또는 `0.0.0.0`으로 변경 후 재시작 |
 | `/api/komga/health`가 `ok:false` | Komga 미도달 또는 키 무효 | 아래 진단 명령 참조 |
 | 코드를 고쳤는데 반영 안 됨 | 재빌드 누락 | `npm run build` 후 재시작. 유닛은 빌드를 하지 않습니다 |
+
+### 9.1 삭제 보호 (`ADMIN_TOKEN`)
+
+시리즈 삭제는 Komga 디스크에서 파일을 지우며 되돌릴 수 없습니다. 그래서 이 경로만 토큰으로 막혀 있습니다. 읽기 경로는 영향받지 않습니다.
+
+| 상황 | 응답 |
+|---|---|
+| `ADMIN_TOKEN` 미설정 | `503` — 삭제 기능 자체가 비활성 (fail-closed) |
+| 헤더 없음 / 토큰 불일치 | `403` |
+| 토큰 일치 | 정상 삭제 |
+
+토큰 발급·적용:
+
+```bash
+openssl rand -hex 24                                   # 토큰 생성
+echo "ADMIN_TOKEN=<생성된-값>" >> ~/panelshift/app/.env.local
+systemctl --user restart panelshift                    # 런타임 변수이므로 재시작만
+```
+
+UI에서는 삭제 확인창에 토큰 입력란이 나옵니다. 서버가 수락한 토큰만 `sessionStorage`에 기억되므로 탭을 닫으면 지워지고, `403`을 받으면 저장된 값이 폐기됩니다.
+
+**삭제 기능을 아예 막고 싶다면** `ADMIN_TOKEN`을 비워두면 됩니다. 그것만으로 모든 삭제 요청이 503으로 거부됩니다.
 
 Komga 연결 진단:
 
@@ -556,12 +603,18 @@ npm run mobile:build:android
 
 지금 구조에서 아쉬운 점을 남겨둡니다.
 
-- 🔴 **인증 없는 파일 삭제 엔드포인트.** `DELETE /api/komga/series/[seriesId]` 는 Komga의 `/api/v1/series/{id}/file` 을 호출합니다. 이는 **디스크에서 만화 파일을 실제로 삭제**하며 되돌릴 수 없습니다. 앱에 인증이 없으므로, 앱에 도달할 수 있는 누구든 `curl -X DELETE` 한 줄로 시리즈를 영구 삭제할 수 있습니다. 현재는 tailnet 바인딩이 유일한 방어선입니다. 최소한 확인 토큰이나 관리자 인증을 붙이거나, 파일 삭제 대신 Komga에서 숨김 처리하는 방식을 검토하세요.
-- **앱 자체 인증 없음.** 현재는 네트워크 경계(Tailscale/리버스 프록시)에만 의존합니다. 인터넷 노출 시 필수 과제입니다.
+### 해결됨
+
+- ✅ **파일 삭제 엔드포인트 무방비** → `ADMIN_TOKEN` 게이트 추가, 미설정 시 fail-closed (9.1절)
+- ✅ **mock 빌드 함정** → `CATALOG_MODE` 런타임 변수 도입. 잘못 구워진 빌드도 재빌드 없이 복구 (3.1.1절)
+- ✅ **헬스체크가 얕음** → 라이브러리·시리즈 개수까지 확인하고, 시리즈가 0이면 `ok:false` 반환
+
+### 남은 것
+
+- **앱 자체 인증 없음.** 삭제는 막혔지만 **카탈로그 열람과 이미지 조회는 여전히 무방비**입니다. 현재는 tailnet 경계가 유일한 방어선입니다. 인터넷 노출이 필요해지면 `src/proxy.ts`(Next 16에서 middleware의 새 이름) 기반 비밀번호 게이트나 인증 리버스 프록시가 필요합니다.
 - **Komga가 `0.0.0.0:25600`에 열려 있음.** 앱이 `localhost`로 부르게 된 지금은 tailnet 노출이 불필요합니다. 4.5절 방식으로 좁히는 것을 권장합니다 (개발 서버 참조를 끊은 뒤).
-- **`.env`와 `.env.local`의 모순.** 저장소의 `.env`가 `mock`, `.env.local`이 `komga`인 구조는 3장 사고를 유발합니다. `.env`에서 `NEXT_PUBLIC_CATALOG_MODE` 줄을 제거하고 mock 실행 시에만 명시적으로 지정하는 편이 안전합니다.
-- **헬스체크가 얕음.** `/api/komga/health`는 연결만 봅니다. 배포 검증을 자동화하려면 실제 시리즈 1건 조회까지 확인하는 편이 낫습니다.
 - **스테이징 없음.** 개발 서버가 곧 테스트 환경입니다. 5.2절의 `NEXT_DIST_DIR` 검증 빌드가 임시 대안입니다.
+- **`ADMIN_TOKEN`이 공유 비밀.** 사용자별 권한 구분이 없고 회수하려면 값을 바꿔 재시작해야 합니다. 관리자가 한 명인 현재 구조에는 충분하지만, 여러 명이 쓰게 되면 실제 계정 체계가 필요합니다.
 
 ### 이전 후 정리할 것
 

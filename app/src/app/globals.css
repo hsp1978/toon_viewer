@@ -1544,6 +1544,29 @@ progress::-moz-progress-bar {
   font-size: 13px;
 }
 
+.modalField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.modalField input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+
+.modalField input:disabled {
+  opacity: 0.6;
+}
+
 .modalActions {
   display: flex;
   justify-content: flex-end;
