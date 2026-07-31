@@ -9,6 +9,8 @@ import {
   CircleDot,
   Clock,
   Database,
+  Eye,
+  EyeOff,
   Grid2X2,
   House,
   LibraryBig,
@@ -17,11 +19,13 @@ import {
   PanelRightOpen,
   Play,
   Search,
+  Trash2,
 } from "lucide-react";
 import Image from "next/image";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { appUrl } from "@/lib/app-url";
+import { loadHiddenSeries, saveHiddenSeries } from "@/lib/hidden-series";
 import type { Book, CatalogOverview, CatalogSource, ReaderMode, Series } from "@/lib/types";
 import { Reader } from "./reader";
 
@@ -155,12 +159,24 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   const [seriesBooksById, setSeriesBooksById] = useState<Record<string, Book[]>>({});
   const [bookStateBySeriesId, setBookStateBySeriesId] = useState<Record<string, SeriesBooksState>>({});
   const [bookErrorBySeriesId, setBookErrorBySeriesId] = useState<Record<string, string>>({});
+  const [hiddenSeriesIds, setHiddenSeriesIds] = useState<Set<string>>(new Set());
+  const [deletedSeriesIds, setDeletedSeriesIds] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Series | null>(null);
+  const [deletingSeriesId, setDeletingSeriesId] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+
+  useEffect(() => {
+    setHiddenSeriesIds(new Set(loadHiddenSeries()));
+  }, []);
 
   const selectedLibrary = catalog.libraries.find((item) => item.id === selectedLibraryId) ?? catalog.libraries[0];
 
   const visibleSeries = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     const filtered = catalog.series.filter((item) => {
+      if (deletedSeriesIds.has(item.id)) return false;
+      if (hiddenSeriesIds.has(item.id) && !showHidden) return false;
       const inLibrary = item.libraryId === selectedLibrary?.id;
       const matchesQuery =
         normalized.length === 0 ||
@@ -178,7 +194,16 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
       const latestDiff = getSeriesTimestamp(right) - getSeriesTimestamp(left);
       return latestDiff || left.title.localeCompare(right.title, "ko");
     });
-  }, [catalog.series, query, selectedLibrary?.id, seriesSortMode]);
+  }, [catalog.series, deletedSeriesIds, hiddenSeriesIds, query, selectedLibrary?.id, seriesSortMode, showHidden]);
+
+  const hiddenCount = useMemo(
+    () =>
+      catalog.series.filter(
+        (item) =>
+          item.libraryId === selectedLibrary?.id && hiddenSeriesIds.has(item.id) && !deletedSeriesIds.has(item.id),
+      ).length,
+    [catalog.series, deletedSeriesIds, hiddenSeriesIds, selectedLibrary?.id],
+  );
 
   const selectedSeries =
     catalog.series.find((item) => item.id === selectedSeriesId) ?? visibleSeries[0] ?? catalog.series[0];
@@ -305,6 +330,52 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
     setReaderStartPage(options.resume ? getBookResumePage(book) : 0);
     setModeOverride("auto");
     setView("reader");
+  }
+
+  function setSeriesHidden(seriesId: string, hidden: boolean) {
+    setHiddenSeriesIds((current) => {
+      const next = new Set(current);
+      if (hidden) {
+        next.add(seriesId);
+      } else {
+        next.delete(seriesId);
+      }
+      saveHiddenSeries([...next]);
+      return next;
+    });
+  }
+
+  function requestDeleteSeries(series: Series) {
+    setDeleteError("");
+    setPendingDelete(series);
+  }
+
+  async function confirmDeleteSeries() {
+    if (!pendingDelete) return;
+    const seriesId = pendingDelete.id;
+    setDeletingSeriesId(seriesId);
+    setDeleteError("");
+
+    try {
+      const response = await fetch(appUrl(`/api/komga/series/${encodeURIComponent(seriesId)}`), {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Delete returned ${response.status}`);
+      }
+
+      setDeletedSeriesIds((current) => new Set(current).add(seriesId));
+      setSeriesHidden(seriesId, false);
+      setPendingDelete(null);
+      if (view !== "browse") {
+        setView("browse");
+      }
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "삭제에 실패했습니다. 다시 시도해 주세요.");
+    } finally {
+      setDeletingSeriesId("");
+    }
   }
 
   async function openPrimaryBook(series: Series) {
@@ -531,6 +602,18 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                     리스트
                   </button>
                 </div>
+                {hiddenCount > 0 ? (
+                  <div className="optionGroup" aria-label="숨긴 작품">
+                    <button
+                      className={`optionButton ${showHidden ? "active" : ""}`}
+                      onClick={() => setShowHidden((value) => !value)}
+                      type="button"
+                    >
+                      {showHidden ? <Eye size={16} /> : <EyeOff size={16} />}
+                      숨긴 작품 {hiddenCount}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -538,39 +621,64 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
               <div className={`seriesShelf ${seriesViewMode === "list" ? "listView" : "gridView"}`}>
                 {visibleSeries.map((item) => {
                   const itemProgress = getSeriesProgressPercent(item, seriesBooksById[item.id] ?? []);
+                  const itemHidden = hiddenSeriesIds.has(item.id);
                   return (
-                    <button
-                      className={`posterCard ${seriesViewMode === "list" ? "listCard" : ""}`}
+                    <div
+                      className={`posterCardWrap ${seriesViewMode === "list" ? "listCardWrap" : ""} ${itemHidden ? "isHidden" : ""}`}
                       key={item.id}
-                      onClick={() => openSeries(item.id)}
-                      type="button"
                     >
-                      <span className="posterFrame">
-                        <Image
-                          alt={`${item.title} cover`}
-                          className="posterCover"
-                          height={256}
-                          src={appUrl(item.coverSrc)}
-                          unoptimized
-                          width={192}
-                        />
-                      </span>
-                      <span className="posterMeta">
-                        <strong>{item.title}</strong>
-                        <span className="posterInfoLine">
-                          <small>{item.subtitle || `${item.bookCount}개 회차`}</small>
-                          <small>{formatSeriesUpdatedAt(item.updatedAt)}</small>
+                      <button
+                        className={`posterCard ${seriesViewMode === "list" ? "listCard" : ""}`}
+                        onClick={() => openSeries(item.id)}
+                        type="button"
+                      >
+                        <span className="posterFrame">
+                          <Image
+                            alt={`${item.title} cover`}
+                            className="posterCover"
+                            height={256}
+                            src={appUrl(item.coverSrc)}
+                            unoptimized
+                            width={192}
+                          />
                         </span>
-                        <ProgressMeter label={getProgressLabel(itemProgress)} value={itemProgress} />
-                        <span className="posterTags">
-                          {item.tags.slice(0, 2).map((tag) => (
-                            <span className="tag" key={tag}>
-                              {tag}
-                            </span>
-                          ))}
+                        <span className="posterMeta">
+                          <strong>{item.title}</strong>
+                          <span className="posterInfoLine">
+                            <small>{item.subtitle || `${item.bookCount}개 회차`}</small>
+                            <small>{formatSeriesUpdatedAt(item.updatedAt)}</small>
+                          </span>
+                          <ProgressMeter label={getProgressLabel(itemProgress)} value={itemProgress} />
+                          <span className="posterTags">
+                            {item.tags.slice(0, 2).map((tag) => (
+                              <span className="tag" key={tag}>
+                                {tag}
+                              </span>
+                            ))}
+                          </span>
                         </span>
-                      </span>
-                    </button>
+                      </button>
+                      <div className="posterActions">
+                        <button
+                          aria-label={itemHidden ? "숨김 해제" : "목록에서 숨기기"}
+                          className="posterActionButton"
+                          onClick={() => setSeriesHidden(item.id, !itemHidden)}
+                          title={itemHidden ? "숨김 해제" : "목록에서 숨기기"}
+                          type="button"
+                        >
+                          {itemHidden ? <Eye size={16} /> : <EyeOff size={16} />}
+                        </button>
+                        <button
+                          aria-label="작품 삭제"
+                          className="posterActionButton danger"
+                          onClick={() => requestDeleteSeries(item)}
+                          title="작품 삭제 (파일 영구 삭제)"
+                          type="button"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -707,6 +815,55 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
           </section>
         </div>
       )}
+
+      {pendingDelete ? (
+        <div
+          className="modalOverlay"
+          onClick={() => {
+            if (!deletingSeriesId) setPendingDelete(null);
+          }}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="modalCard"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="modalIcon danger">
+              <AlertTriangle size={26} />
+            </div>
+            <h3>작품을 삭제할까요?</h3>
+            <p>
+              <strong>{pendingDelete.title}</strong>의 모든 파일이 Komga 서버 디스크에서 <strong>영구 삭제</strong>됩니다.
+              이 작업은 되돌릴 수 없습니다.
+            </p>
+            <p className="modalHint">
+              지우지 않고 목록에서만 감추려면 취소 후 <EyeOff size={13} /> 숨기기를 사용하세요.
+            </p>
+            {deleteError ? <p className="modalError">{deleteError}</p> : null}
+            <div className="modalActions">
+              <button
+                className="secondaryAction"
+                disabled={Boolean(deletingSeriesId)}
+                onClick={() => setPendingDelete(null)}
+                type="button"
+              >
+                취소
+              </button>
+              <button
+                className="dangerAction"
+                disabled={Boolean(deletingSeriesId)}
+                onClick={() => void confirmDeleteSeries()}
+                type="button"
+              >
+                {deletingSeriesId ? <Loader2 size={17} /> : <Trash2 size={17} />}
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

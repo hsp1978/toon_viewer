@@ -405,6 +405,21 @@ export async function updateKomgaReadProgress(bookId: string, page: number, comp
   return { ok: true, mode: "komga" as const };
 }
 
+export async function deleteKomgaSeries(seriesId: string) {
+  const config = getKomgaConfig();
+  if (config.forceMock || !config.baseUrl) {
+    return { ok: true, mode: "mock" as const };
+  }
+
+  await komgaFetch(
+    `/api/v1/series/${encodeURIComponent(seriesId)}/file`,
+    { method: "DELETE" },
+    config,
+  );
+
+  return { ok: true, mode: "komga" as const };
+}
+
 export async function getCatalogSnapshot(): Promise<CatalogSnapshot> {
   const config = getKomgaConfig();
   if (config.forceMock || !config.baseUrl) {

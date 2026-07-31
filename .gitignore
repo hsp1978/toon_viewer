@@ -5,6 +5,8 @@ out/
 .env*.local
 app/.env.local
 app/.next/
+# Alternate build dir used by NEXT_DIST_DIR verification builds
+app/.next-verify/
 app/node_modules/
 komga/config/*
 !komga/config/.gitkeep

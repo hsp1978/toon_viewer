@@ -1409,3 +1409,164 @@ progress::-moz-progress-bar {
     line-height: 1.1;
   }
 }
+
+/* Series card actions (hide / delete) */
+.posterCardWrap {
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+
+.posterCardWrap .posterCard {
+  width: 100%;
+}
+
+.posterCardWrap.isHidden .posterCard {
+  opacity: 0.5;
+}
+
+.posterActions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.posterCardWrap:hover .posterActions,
+.posterCardWrap:focus-within .posterActions,
+.posterCardWrap.isHidden .posterActions {
+  opacity: 1;
+}
+
+.posterActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 16px rgba(31, 36, 29, 0.16);
+  backdrop-filter: blur(2px);
+}
+
+.posterActionButton:hover {
+  border-color: var(--line-strong);
+  background: #ffffff;
+}
+
+.posterActionButton.danger {
+  color: var(--clay);
+}
+
+.posterActionButton.danger:hover {
+  color: #ffffff;
+  background: var(--clay);
+  border-color: var(--clay);
+}
+
+/* Touch devices: keep actions visible since there is no hover */
+@media (hover: none) {
+  .posterActions {
+    opacity: 1;
+  }
+}
+
+/* Confirmation modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(21, 23, 19, 0.5);
+  backdrop-filter: blur(3px);
+}
+
+.modalCard {
+  width: min(400px, 100%);
+  display: grid;
+  gap: 10px;
+  padding: 24px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.modalCard h3 {
+  font-size: 18px;
+}
+
+.modalCard p {
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.modalCard p strong {
+  color: var(--ink);
+}
+
+.modalIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.modalIcon.danger {
+  background: var(--clay-soft);
+  color: var(--clay);
+}
+
+.modalHint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+.modalError {
+  color: var(--clay);
+  font-size: 13px;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.dangerAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: #ffffff;
+  background: var(--clay);
+  font-weight: 600;
+}
+
+.dangerAction:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.dangerAction:disabled {
+  opacity: 0.7;
+}
