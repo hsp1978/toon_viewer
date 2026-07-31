@@ -6,10 +6,13 @@
 
 이 문서의 내용은 검증 수준이 다릅니다. 혼동하지 않도록 구분해 둡니다.
 
+**이 문서의 절차는 2026-07-31 `testserver`에 실제로 적용되어 검증되었습니다.** 배포된 리비전은 `f221ad6` (`feat/desktop-web-ui-polish`)입니다.
+
 | 구분 | 내용 |
 |---|---|
-| ✅ 개발 서버에서 실제 검증됨 | 빌드 성공, systemd 유닛 기동/자동재시작, Komga 연결, `NEXT_PUBLIC_` 빌드 시점 고정 동작 (3장) |
-| ⚠️ 미검증 (표준 절차 기반) | 운영 서버에서의 실행. 운영 호스트가 아직 지정되지 않아 실행/테스트하지 않았습니다. 최초 1회는 아래 8장 체크리스트로 반드시 확인하세요. |
+| ✅ 운영 서버에서 실제 검증됨 | clone → `npm ci` → build → systemd 등록 → 8장 체크리스트 전항목 통과. 실제 라이브러리 렌더링, 썸네일·페이지 이미지 프록시, 자동 재시작 |
+| ✅ 개발 서버에서 검증됨 | `NEXT_PUBLIC_` 빌드 시점 고정 동작 (3장) |
+| ⚠️ 미완료 | **linger 미설정** (sudo 비밀번호 필요). 현재 상태로는 재부팅 후 자동 기동되지 않습니다 — 4.6절 참조 |
 
 ---
 
@@ -56,14 +59,28 @@
 운영 서버에서 배포 전에 확인하세요.
 
 ```bash
-node -v          # 20.x 필요 (개발 서버는 v20.20.2)
-npm -v           # 11.x
+node -v          # 20 이상
+npm -v
 git --version
 systemctl --user is-system-running   # user systemd 사용 가능해야 함
 docker ps | grep -i komga            # 기존 Komga 컨테이너 확인
+free -h          # 빌드에 여유 메모리 필요
+sudo -n true     # 무인 sudo 가능 여부 (linger 설정에 필요)
 ```
 
-Node가 없거나 20 미만이면 먼저 설치해야 합니다. Komga만 돌던 서버라면 Node가 없을 가능성이 높습니다.
+**실제 확인된 운영 서버 환경 (2026-07-31)**
+
+| 항목 | 값 | 비고 |
+|---|---|---|
+| OS | Ubuntu 22.04.3 LTS (x86_64) | |
+| Node / npm | **v24.15.0** / 11.16.0 | 개발 서버(v20.20.2)와 다르지만 빌드·구동 정상 확인 |
+| Komga | `gotson/komga:latest`, 2개월 가동 | 저장소 compose의 핀 버전(1.24.4)과 다름 |
+| Komga 바인딩 | `0.0.0.0:25600` | tailnet·LAN에 노출된 상태 (4.5절) |
+| 메모리 | 3.8Gi (가용 2.0Gi) + swap 3.8Gi | 빌드는 통과했으나 여유롭지 않음 |
+| 디스크 | 313G 중 136G 여유 | |
+| sudo | **비밀번호 필요** | `/opt` 사용 불가 → `~/panelshift`에 설치 |
+
+Node 버전이 개발 서버와 다르지만(20 vs 24) 빌드·구동 모두 문제없었습니다. 다만 **빌드 산출물을 서버 간에 복사하는 방식(2장의 세 번째 옵션)은 이 차이 때문에 더욱 권장하지 않습니다.** 각 서버에서 빌드하세요.
 
 ---
 
@@ -126,15 +143,15 @@ forceMock:"true"===process.env.KOMGA_FORCE_MOCK
 
 ```bash
 # 개발 서버(alienware-1)에서 운영 서버(testserver)로
-scp /home/ubuntu/viewer/app/.env.local 100.114.4.40:/opt/panelshift/app/.env.local
+scp /home/ubuntu/viewer/app/.env.local 100.114.4.40:/home/ubuntu/panelshift/app/.env.local
 ```
 
 ⚠️ **그대로 복사하면 안 됩니다.** 개발 서버의 `.env.local`은 `KOMGA_BASE_URL=http://100.114.4.40:25600`을 가리킵니다. 이 값이 운영 서버에 그대로 들어가면 앱이 자기 자신의 tailnet 주소로 우회 호출하게 됩니다. 동작은 하지만 1.2절의 이점이 사라집니다. 복사 후 반드시 `localhost`로 고치세요.
 
 ```bash
 # 운영 서버에서
-sed -i 's|^KOMGA_BASE_URL=.*|KOMGA_BASE_URL=http://localhost:25600|' /opt/panelshift/app/.env.local
-grep KOMGA_BASE_URL /opt/panelshift/app/.env.local
+sed -i 's|^KOMGA_BASE_URL=.*|KOMGA_BASE_URL=http://localhost:25600|' /home/ubuntu/panelshift/app/.env.local
+grep KOMGA_BASE_URL /home/ubuntu/panelshift/app/.env.local
 ```
 
 또는 운영 서버에서 직접 작성합니다.
@@ -174,21 +191,25 @@ KOMGA_BOOTSTRAP_BOOK_LIMIT=0
 
 ## 4. 최초 배포 (1회만)
 
-운영 서버에서 실행합니다. 설치 경로는 `/opt/panelshift` 예시입니다.
+운영 서버에서 실행합니다. 설치 경로는 `/home/ubuntu/panelshift` 입니다.
+
+> `/opt/panelshift`를 쓰지 않는 이유: 운영 서버는 무인 sudo가 불가능해 `/opt` 아래에 디렉터리를 만들 수 없습니다. 홈 디렉터리는 sudo 없이 쓸 수 있고, systemd **user** 유닛과도 잘 맞습니다.
 
 ### 4.1 소스 가져오기
 
 ```bash
-sudo mkdir -p /opt/panelshift && sudo chown $USER:$USER /opt/panelshift
-git clone https://github.com/hsp1978/toon_viewer.git /opt/panelshift
-cd /opt/panelshift
-git checkout main
+git clone --branch feat/desktop-web-ui-polish \
+  https://github.com/hsp1978/toon_viewer.git ~/panelshift
+cd ~/panelshift
+git log --oneline -1        # 의도한 리비전인지 확인
 ```
+
+> 현재 운영에 올라간 것은 `main`이 아니라 `feat/desktop-web-ui-polish` 브랜치입니다. 데스크톱 레이아웃 개선과 시리즈 숨김/삭제 기능이 이 브랜치에만 있기 때문입니다. main으로 병합한 뒤에는 5장의 갱신 절차에서 브랜치명을 바꾸세요.
 
 ### 4.2 의존성 설치
 
 ```bash
-cd /opt/panelshift/app
+cd /home/ubuntu/panelshift/app
 npm ci        # package-lock.json 기준 재현 설치. npm install 대신 ci 사용
 ```
 
@@ -197,13 +218,13 @@ npm ci        # package-lock.json 기준 재현 설치. npm install 대신 ci �
 3.2절 참고. 이 단계를 건너뛰면 mock 모드가 구워집니다.
 
 ```bash
-test -f /opt/panelshift/app/.env.local && echo OK || echo "중단: .env.local 없음"
+test -f /home/ubuntu/panelshift/app/.env.local && echo OK || echo "중단: .env.local 없음"
 ```
 
 ### 4.4 빌드
 
 ```bash
-cd /opt/panelshift/app
+cd /home/ubuntu/panelshift/app
 npm run build
 ```
 
@@ -242,11 +263,11 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/panelshift/app
+WorkingDirectory=/home/ubuntu/panelshift/app
 
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do /usr/sbin/ip -4 addr show tailscale0 2>/dev/null | grep -q "inet 100.114.4.40/" && exit 0; sleep 2; done; echo "tailscale0 에 100.114.4.40 미할당" >&2; exit 1'
 
-ExecStart=/usr/bin/node /opt/panelshift/app/node_modules/next/dist/bin/next start --hostname 100.114.4.40 --port 3001
+ExecStart=/usr/bin/node /home/ubuntu/panelshift/app/node_modules/next/dist/bin/next start --hostname 100.114.4.40 --port 3001
 
 Environment=NODE_ENV=production
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
@@ -273,14 +294,21 @@ systemctl --user enable --now panelshift.service
 sudo loginctl enable-linger $USER    # 필수: 로그아웃/재부팅 후에도 유지
 ```
 
-`enable-linger`를 빼먹으면 로그아웃하는 순간 서비스가 내려갑니다. 개발 서버에서 실제로 이 항목이 누락되어 있었습니다.
+🔴 **현재 운영 서버에 이 설정이 빠져 있습니다.** 무인 sudo가 불가능해 자동화하지 못했습니다. 운영 서버에서 직접 실행해주세요.
+
+```bash
+sudo loginctl enable-linger ubuntu
+loginctl show-user ubuntu --property=Linger   # → Linger=yes 확인
+```
+
+이걸 하지 않으면 SSH 세션이 모두 끊기거나 재부팅했을 때 서비스가 내려가고 다시 올라오지 않습니다. 개발 서버(`alienware-1`)도 동일하게 미설정 상태입니다.
 
 ### 4.7 환경별 주의점
 
 **nvm으로 node를 설치한 경우** — systemd는 `.bashrc`를 읽지 않아 `node`를 찾지 못합니다. `ExecStart`에 절대 경로를 쓰고 `PATH`에도 해당 디렉터리를 추가하세요. 개발 서버 유닛이 이 방식입니다.
 
 ```ini
-ExecStart=/home/ubuntu/.nvm/versions/node/v20.20.2/bin/node /opt/panelshift/app/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3001
+ExecStart=/home/ubuntu/.nvm/versions/node/v20.20.2/bin/node /home/ubuntu/panelshift/app/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3001
 Environment=PATH=/home/ubuntu/.nvm/versions/node/v20.20.2/bin:/usr/local/bin:/usr/bin:/bin
 ```
 
@@ -309,7 +337,7 @@ ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do /usr/sbin/ip -4 addr show ta
 **순서가 중요합니다: 빌드 성공을 확인한 다음 재시작합니다.** 반대로 하면 실패한 빌드로 서비스가 내려갑니다.
 
 ```bash
-cd /opt/panelshift
+cd /home/ubuntu/panelshift
 git pull --ff-only origin main
 cd app
 npm ci                                  # package-lock.json 변경 시에만 필요하나, 항상 해도 안전
@@ -325,7 +353,7 @@ systemctl --user restart panelshift
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_ROOT="/opt/panelshift"
+APP_ROOT="/home/ubuntu/panelshift"
 APP_DIR="$APP_ROOT/app"
 BRANCH="${1:-main}"
 HEALTH_HOST="100.114.4.40"        # 유닛의 --hostname 과 반드시 일치
@@ -414,7 +442,7 @@ git으로 넘어가지 않으며, 넘겨서도 안 되는 것들입니다.
 ## 7. 롤백
 
 ```bash
-cd /opt/panelshift
+cd /home/ubuntu/panelshift
 git log --oneline -10                       # 되돌릴 리비전 확인
 git checkout <직전-리비전>
 cd app && npm ci && npm run build
@@ -455,7 +483,7 @@ curl -s http://$HOST:3001/api/komga/health
 curl -s -o /dev/null -w "%{http_code}\n" http://$HOST:3001/     # → 200
 
 # 4-1. 기존 Komga가 손상되지 않았는지 (라이브러리가 그대로 보이는지)
-curl -s -H "X-API-Key: $(grep ^KOMGA_API_KEY /opt/panelshift/app/.env.local | cut -d= -f2)" \
+curl -s -H "X-API-Key: $(grep ^KOMGA_API_KEY /home/ubuntu/panelshift/app/.env.local | cut -d= -f2)" \
   "http://localhost:25600/api/v1/series?size=1" | head -c 200
 
 # 5. 자동 재시작 동작
@@ -485,7 +513,7 @@ loginctl show-user $USER --property=Linger        # → Linger=yes
 Komga 연결 진단:
 
 ```bash
-KEY="$(grep ^KOMGA_API_KEY /opt/panelshift/app/.env.local | cut -d= -f2)"
+KEY="$(grep ^KOMGA_API_KEY /home/ubuntu/panelshift/app/.env.local | cut -d= -f2)"
 
 # 도달성 + 키 유효성 (401이면 키 문제, 연결 자체가 안 되면 Komga가 안 떠 있음)
 curl -s -H "X-API-Key: $KEY" http://localhost:25600/api/v2/users/me
@@ -515,7 +543,7 @@ APK 재빌드가 필요한 경우는 접속 대상 서버가 바뀔 때입니다
 이번 이전에서는 접속 대상이 `100.92.142.40`(개발) → `100.114.4.40`(운영)으로 **바뀌므로 재빌드가 필요합니다.**
 
 ```bash
-cd /opt/panelshift/app
+cd /home/ubuntu/panelshift/app
 CAPACITOR_SERVER_URL=http://100.114.4.40:3001 npm run mobile:sync
 npm run mobile:build:android
 ```
@@ -528,7 +556,9 @@ npm run mobile:build:android
 
 지금 구조에서 아쉬운 점을 남겨둡니다.
 
+- 🔴 **인증 없는 파일 삭제 엔드포인트.** `DELETE /api/komga/series/[seriesId]` 는 Komga의 `/api/v1/series/{id}/file` 을 호출합니다. 이는 **디스크에서 만화 파일을 실제로 삭제**하며 되돌릴 수 없습니다. 앱에 인증이 없으므로, 앱에 도달할 수 있는 누구든 `curl -X DELETE` 한 줄로 시리즈를 영구 삭제할 수 있습니다. 현재는 tailnet 바인딩이 유일한 방어선입니다. 최소한 확인 토큰이나 관리자 인증을 붙이거나, 파일 삭제 대신 Komga에서 숨김 처리하는 방식을 검토하세요.
 - **앱 자체 인증 없음.** 현재는 네트워크 경계(Tailscale/리버스 프록시)에만 의존합니다. 인터넷 노출 시 필수 과제입니다.
+- **Komga가 `0.0.0.0:25600`에 열려 있음.** 앱이 `localhost`로 부르게 된 지금은 tailnet 노출이 불필요합니다. 4.5절 방식으로 좁히는 것을 권장합니다 (개발 서버 참조를 끊은 뒤).
 - **`.env`와 `.env.local`의 모순.** 저장소의 `.env`가 `mock`, `.env.local`이 `komga`인 구조는 3장 사고를 유발합니다. `.env`에서 `NEXT_PUBLIC_CATALOG_MODE` 줄을 제거하고 mock 실행 시에만 명시적으로 지정하는 편이 안전합니다.
 - **헬스체크가 얕음.** `/api/komga/health`는 연결만 봅니다. 배포 검증을 자동화하려면 실제 시리즈 1건 조회까지 확인하는 편이 낫습니다.
 - **스테이징 없음.** 개발 서버가 곧 테스트 환경입니다. 5.2절의 `NEXT_DIST_DIR` 검증 빌드가 임시 대안입니다.
