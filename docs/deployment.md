@@ -12,7 +12,8 @@
 |---|---|
 | ✅ 운영 서버에서 실제 검증됨 | clone → `npm ci` → build → systemd 등록 → 8장 체크리스트 전항목 통과. 실제 라이브러리 렌더링, 썸네일·페이지 이미지 프록시, 자동 재시작 |
 | ✅ 개발 서버에서 검증됨 | `NEXT_PUBLIC_` 빌드 시점 고정 동작 (3장) |
-| ⚠️ 미완료 | **linger 미설정** (sudo 비밀번호 필요). 현재 상태로는 재부팅 후 자동 기동되지 않습니다 — 4.6절 참조 |
+| ✅ 완료 | linger 설정(재부팅 내구성), Komga 노출 축소(4.5.1절), 개발 서버 중복 구동 해제 |
+| ⚠️ 남음 | `docker.service`의 tailscaled 순서 지정(sudo 필요, 4.5.1절), Android APK 재빌드(10장) |
 
 ---
 
@@ -50,7 +51,7 @@
 이 이전으로 얻는 것:
 
 - **Komga 호출이 loopback으로 바뀝니다.** 페이지 이미지·썸네일은 전부 앱 서버가 프록시하므로 이미지 1장마다 tailnet을 왕복하던 것이 사라집니다. 만화 뷰어 특성상 체감 차이가 가장 큰 부분입니다.
-- **Komga를 tailnet에 노출할 필요가 없어집니다.** Komga 바인딩을 `127.0.0.1:25600`으로 좁혀도 앱은 정상 동작합니다 (4.5절).
+- **Komga의 LAN 노출을 없앨 수 있습니다.** 앱은 루프백만 있으면 되므로 바인딩을 좁힐 수 있습니다 (4.5.1절).
 
 핵심 원칙: **Komga API 키는 Next 서버 프로세스에만 존재합니다.** 페이지 이미지·썸네일·읽기 진행률은 모두 `/api/komga/...` 라우트로 프록시되어 브라우저에 키가 노출되지 않습니다. 배포 시 이 경계를 깨지 않는 것이 가장 중요합니다.
 
@@ -75,7 +76,7 @@ sudo -n true     # 무인 sudo 가능 여부 (linger 설정에 필요)
 | OS | Ubuntu 22.04.3 LTS (x86_64) | |
 | Node / npm | **v24.15.0** / 11.16.0 | 개발 서버(v20.20.2)와 다르지만 빌드·구동 정상 확인 |
 | Komga | `gotson/komga:latest`, 2개월 가동 | 저장소 compose의 핀 버전(1.24.4)과 다름 |
-| Komga 바인딩 | `0.0.0.0:25600` | tailnet·LAN에 노출된 상태 (4.5절) |
+| Komga 바인딩 | 최초 `0.0.0.0:25600` → 현재 루프백 + tailscale IP | 4.5.1절에서 축소 완료 |
 | 메모리 | 3.8Gi (가용 2.0Gi) + swap 3.8Gi | 빌드는 통과했으나 여유롭지 않음 |
 | 디스크 | 313G 중 136G 여유 | |
 | sudo | **비밀번호 필요** | `/opt` 사용 불가 → `~/panelshift`에 설치 |
@@ -408,63 +409,29 @@ systemctl --user restart panelshift
 
 ### 5.1 배포 스크립트
 
-`scripts/deploy.sh` 로 저장해 두면 편합니다. 실패 시 재시작하지 않고 멈춥니다.
+`scripts/deploy.sh` 가 위 절차를 그대로 수행합니다. 저장소에 포함되어 있으므로 운영 서버에서 바로 쓸 수 있습니다.
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-APP_ROOT="/home/ubuntu/panelshift"
-APP_DIR="$APP_ROOT/app"
-BRANCH="${1:-main}"
-HEALTH_HOST="100.114.4.40"        # 유닛의 --hostname 과 반드시 일치
-
-cd "$APP_DIR"
-
-# 시크릿 누락 시 mock 모드가 구워지는 것을 방지 (3장 참조)
-if [[ ! -f .env.local ]]; then
-  echo "중단: $APP_DIR/.env.local 이 없습니다. 빌드하면 mock 모드가 고정됩니다." >&2
-  exit 1
-fi
-
-PREV_REV="$(git -C "$APP_ROOT" rev-parse HEAD)"
-echo "현재 리비전: $PREV_REV"
-
-git -C "$APP_ROOT" fetch origin "$BRANCH"
-git -C "$APP_ROOT" merge --ff-only "origin/$BRANCH"
-
-npm ci
-
-# 빌드 실패 시 여기서 종료되므로 기존 서비스는 계속 동작합니다
-npm run build
-
-systemctl --user restart panelshift
-
-# 기동 확인
-sleep 5
-for i in $(seq 1 12); do
-  if curl -fsS "http://$HEALTH_HOST:3001/api/komga/health" >/dev/null 2>&1; then
-    HEALTH="$(curl -sS "http://$HEALTH_HOST:3001/api/komga/health")"
-    echo "$HEALTH"
-    # mode 가 mock 이면 3장 함정에 빠진 것이므로 성공으로 취급하지 않습니다
-    if [[ "$HEALTH" != *'"mode":"komga"'* ]]; then
-      echo "중단: mock 모드로 빌드되었습니다. .env.local 확인 후 재빌드하세요." >&2
-      exit 1
-    fi
-    echo "배포 성공"
-    exit 0
-  fi
-  sleep 3
-done
-
-echo "헬스체크 실패. 롤백 방법은 7장 참조. 직전 리비전: $PREV_REV" >&2
-journalctl --user -u panelshift -n 40 --no-pager >&2
-exit 1
+cd ~/panelshift
+./scripts/deploy.sh                 # 현재 체크아웃된 브랜치를 갱신 배포
+./scripts/deploy.sh main            # 특정 브랜치를 지정
 ```
 
-> 헬스체크 URL의 호스트는 유닛의 `--hostname` 설정과 일치시켜야 합니다. Tailscale IP에 바인딩했다면 `127.0.0.1`로는 **응답하지 않습니다** (개발 서버에서 확인함). 그래서 `HEALTH_HOST`를 상단에서 한 번만 정의하도록 했습니다.
+동작 요약:
+
+| 단계 | 실패 시 |
+|---|---|
+| `.env.local` 존재 확인 | 즉시 중단 (mock 모드로 구워지는 것 방지) |
+| `git fetch` + `merge --ff-only` | 즉시 중단 |
+| `npm ci` → `npm run build` | **재시작하지 않고 중단** — 기존 서비스는 계속 동작 |
+| `systemctl --user restart` | — |
+| 헬스체크 (최대 60초) | 로그 40줄 출력 후 실패 반환 |
+
+인자를 주지 않으면 **현재 체크아웃된 브랜치**를 그대로 씁니다. 실수로 배포 대상이 바뀌지 않도록 한 것입니다. 경로나 서비스명이 다르면 `PANELSHIFT_ROOT`, `PANELSHIFT_SERVICE`, `PANELSHIFT_HEALTH_HOST`, `PANELSHIFT_HEALTH_PORT` 로 덮어쓸 수 있습니다.
+
+> 헬스체크 호스트는 systemd 유닛의 `ExecStart=` 줄에서 `--hostname` 값을 읽어 자동으로 맞춥니다. Tailscale IP에 바인딩했다면 `127.0.0.1`로는 응답하지 않기 때문입니다.
 >
-> 스크립트는 HTTP 200뿐 아니라 `"mode":"komga"` 까지 확인합니다. 3장의 mock 함정은 HTTP 200을 정상 반환하기 때문에, 상태 코드만으로는 절대 잡히지 않습니다.
+> 그리고 HTTP 200만 보지 않고 `"mode":"komga"` 와 `"ok":true` 까지 확인합니다. 3장의 mock 함정은 정상적으로 200을 반환하므로 상태 코드만으로는 절대 잡히지 않습니다.
 
 ### 5.2 라이브 빌드를 건드리지 않고 미리 검증하기
 
