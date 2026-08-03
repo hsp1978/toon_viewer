@@ -264,7 +264,50 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:25600/api/v1/series   
 
 `401`이면 정상입니다 (인증 없이 불렀으므로). 연결 자체가 안 되면 Komga가 loopback에 바인딩되어 있는지 확인하세요.
 
-**선택 사항 — Komga 노출 축소.** 앱이 같은 호스트에서 `localhost`로 부르게 되면, Komga를 더 이상 tailnet에 열어둘 이유가 없습니다. 기존 Komga의 포트 매핑을 `127.0.0.1:25600:25600`으로 좁히면 공격 표면이 줄어듭니다. 단, 개발 서버가 여전히 `100.114.4.40:25600`을 직접 참조하고 있으므로 **개발 환경을 먼저 정리한 뒤에** 적용하세요 (11장 참조).
+### 4.5.1 Komga 노출 범위 (적용 완료)
+
+Komga는 `webtoon-scraper` 스택의 일부이며, 정의 파일은 이 저장소가 아니라 **`/home/ubuntu/webtoon-scraper/docker-compose.yml`** 입니다.
+
+원래 `"25600:25600"`(= `0.0.0.0`)이라 LAN의 모든 기기가 Komga에 직접 닿았습니다. 현재는 두 주소로만 좁혀져 있습니다.
+
+```yaml
+  komga:
+    ports:
+      - "127.0.0.1:25600:25600"      # 패널시프트 앱이 쓰는 경로
+      - "100.114.4.40:25600:25600"   # tailnet에서 Komga 웹 UI 접근용
+```
+
+| 출발지 | 결과 |
+|---|---|
+| 앱 → `localhost:25600` | ✅ 200 |
+| tailnet → `100.114.4.40:25600` | ✅ 200 |
+| LAN → `192.168.219.102:25600` | 🚫 차단 |
+
+> ⚠️ **루프백을 반드시 함께 남겨두세요.** Tailscale IP 하나만 지정하면 `127.0.0.1` 바인딩이 사라져서 **앱이 Komga에 닿지 못합니다.** 실제로 이 상태가 되어 health가 `{"ok":false,"error":"fetch failed"}`로 떨어진 적이 있습니다. 두 줄 다 있어야 합니다.
+
+적용 방법:
+
+```bash
+cd /home/ubuntu/webtoon-scraper
+cp docker-compose.yml docker-compose.yml.bak-$(date +%Y%m%d-%H%M%S)
+# ports 를 위와 같이 두 줄로 수정
+docker compose config --quiet          # 문법 확인
+docker compose up -d --no-deps komga   # komga 만 재생성
+```
+
+`--no-deps`로 같은 스택의 다른 컨테이너(스크레이퍼 등)는 건드리지 않습니다.
+
+**부팅 순서 주의.** `docker.service`는 `tailscaled.service`에 의존하지 않습니다. 재부팅 시 tailscale IP가 붙기 전에 docker가 먼저 뜨면 `100.114.4.40` 바인딩이 실패합니다. `restart: unless-stopped` 정책이 재시도하므로 대개 스스로 복구되지만, 확실히 하려면 sudo로 순서를 지정하세요.
+
+```bash
+sudo systemctl edit docker.service
+# 아래 내용 추가
+# [Unit]
+# After=tailscaled.service
+# Wants=tailscaled.service
+```
+
+이 설정을 넣지 않아도 `127.0.0.1` 바인딩은 항상 성공하므로 **앱 자체는 부팅 직후에도 정상 동작합니다.** 영향받는 것은 tailnet에서의 Komga UI 접근뿐입니다.
 
 ### 4.6 systemd 서비스 등록
 
@@ -613,10 +656,17 @@ npm run mobile:build:android
 
 ### 남은 것
 
-- **앱 자체 인증 없음.** 삭제는 막혔지만 **카탈로그 열람과 이미지 조회는 여전히 무방비**입니다. 현재는 tailnet 경계가 유일한 방어선입니다. 인터넷 노출이 필요해지면 `src/proxy.ts`(Next 16에서 middleware의 새 이름) 기반 비밀번호 게이트나 인증 리버스 프록시가 필요합니다.
-- **Komga가 `0.0.0.0:25600`에 열려 있음.** 앱이 `localhost`로 부르게 된 지금은 tailnet 노출이 불필요합니다. 4.5절 방식으로 좁히는 것을 권장합니다 (개발 서버 참조를 끊은 뒤).
+- ✅ **Komga `0.0.0.0` 노출** → 루프백 + tailscale IP 두 주소로 축소, LAN 차단 확인 (4.5.1절)
+- ✅ **개발/운영 중복 구동** → 개발 서버(`alienware-1`) 유닛 `disable --now` 처리. 되살리려면 `systemctl --user enable --now panelshift`
+
+### 남은 것
+
+운영자가 **한 명이고 tailnet 안에서만** 쓰는 현재 전제에서는 아래 항목들이 실질적 위험은 아닙니다. 전제가 바뀔 때 다시 보세요.
+
+- **앱 자체 인증 없음.** 삭제는 막혔지만 카탈로그 열람과 이미지 조회는 tailnet 경계에만 의존합니다. tailnet은 기기 단위로 인증된 사설망이므로 1인 사용에는 충분합니다. **인터넷에 노출하거나 남과 공유하게 되면** `src/proxy.ts`(Next 16에서 middleware의 새 이름) 기반 게이트나 인증 리버스 프록시가 필요합니다.
+- **`ADMIN_TOKEN`이 공유 비밀.** 사용자별 신원 구분이 없고, 회수하려면 값을 바꿔 재시작해야 합니다. 관리자 1인 구조에는 적정하지만, 여러 명이 쓰게 되면 계정 체계가 필요합니다.
 - **스테이징 없음.** 개발 서버가 곧 테스트 환경입니다. 5.2절의 `NEXT_DIST_DIR` 검증 빌드가 임시 대안입니다.
-- **`ADMIN_TOKEN`이 공유 비밀.** 사용자별 권한 구분이 없고 회수하려면 값을 바꿔 재시작해야 합니다. 관리자가 한 명인 현재 구조에는 충분하지만, 여러 명이 쓰게 되면 실제 계정 체계가 필요합니다.
+- **삭제가 실제로 동작하는지 미확인.** Komga의 `/data`는 `:ro`(읽기 전용)로 마운트되어 있습니다. 그래서 시리즈 삭제가 파일까지 지우지 못하고 실패할 가능성이 있습니다. Komga가 비동기 `202`로 응답하는 탓에 호출 결과만으로는 알 수 없고, 확인하려면 실제로 한 건 지워봐야 하므로 검증하지 않았습니다.
 
 ### 이전 후 정리할 것
 
