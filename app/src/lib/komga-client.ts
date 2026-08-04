@@ -366,7 +366,9 @@ async function getKomgaCatalogOverview(config: KomgaConfig): Promise<CatalogOver
   const libraryRecords = await getJson("/api/v1/libraries", config).then(getContentArray);
   const rawBooks = await getBookRecords(config);
   const books = rawBooks.map((record) => normalizeBook(record, []));
-  const seriesRecords = await getSeriesRecords(config);
+  // Komga keeps a deleted series in its trash until the trash is emptied, so
+  // a series whose files are gone would otherwise linger in the catalog.
+  const seriesRecords = (await getSeriesRecords(config)).filter((record) => record.deleted !== true);
   const series = seriesRecords.map((record) => normalizeSeries(record, books));
   const libraries = attachCounts(libraryRecords.map(normalizeLibrary), series, books);
 
