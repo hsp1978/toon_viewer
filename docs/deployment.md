@@ -13,7 +13,7 @@
 | ✅ 운영 서버에서 실제 검증됨 | clone → `npm ci` → build → systemd 등록 → 8장 체크리스트 전항목 통과. 실제 라이브러리 렌더링, 썸네일·페이지 이미지 프록시, 자동 재시작 |
 | ✅ 개발 서버에서 검증됨 | `NEXT_PUBLIC_` 빌드 시점 고정 동작 (3장) |
 | ✅ 완료 | linger 설정(재부팅 내구성), Komga 노출 축소(4.5.1절), 개발 서버 중복 구동 해제 |
-| ⚠️ 남음 | `docker.service`의 tailscaled 순서 지정(sudo 필요, 4.5.1절), Android APK 재빌드(10장) |
+| ⚠️ 남음 | `docker.service`의 tailscaled 순서 지정(sudo 필요, 4.5.1절), Android APK 재빌드(불필요 — PWA 사용) |
 
 ---
 
@@ -217,13 +217,12 @@ KOMGA_BOOTSTRAP_BOOK_LIMIT=0
 ### 4.1 소스 가져오기
 
 ```bash
-git clone --branch feat/desktop-web-ui-polish \
-  https://github.com/hsp1978/toon_viewer.git ~/panelshift
+git clone https://github.com/hsp1978/toon_viewer.git ~/panelshift
 cd ~/panelshift
 git log --oneline -1        # 의도한 리비전인지 확인
 ```
 
-> 현재 운영에 올라간 것은 `main`이 아니라 `feat/desktop-web-ui-polish` 브랜치입니다. 데스크톱 레이아웃 개선과 시리즈 숨김/삭제 기능이 이 브랜치에만 있기 때문입니다. main으로 병합한 뒤에는 5장의 갱신 절차에서 브랜치명을 바꾸세요.
+> 운영은 **`main`** 브랜치를 추적합니다. 작업하던 `feat/desktop-web-ui-polish`는 fast-forward로 main에 병합되었습니다.
 
 ### 4.2 의존성 설치
 
@@ -569,6 +568,41 @@ UI에서는 삭제 확인창에 토큰 입력란이 나옵니다. 서버가 수�
 
 > 검증 시 주의: Komga는 **존재하지 않는 시리즈 ID에 대한 삭제도 `202 Accepted`로 응답**합니다(비동기 작업으로 접수). 따라서 앱이 `200`을 돌려줬다고 해서 실제로 뭔가 지워졌다는 뜻은 아닙니다. 토큰 통과 여부만 확인하려면 위 8장 3-1처럼 **토큰 없이 403/503이 나오는지**를 보세요. 실제 삭제 여부는 `series` 개수 변화로 확인해야 합니다.
 
+### 9.2 삭제가 실제로 파일을 지우기까지 필요한 조건
+
+삭제 기능은 앱만으로 완성되지 않습니다. Komga 쪽 조건이 세 가지 맞아야 합니다. **현재 운영 서버는 셋 다 충족된 상태이며 실제 삭제까지 검증했습니다.**
+
+**① `/data` 마운트가 쓰기 가능해야 합니다.** 원래 `:ro`였고, 그 상태에서는 파일이 지워지지 않습니다.
+
+```yaml
+# /home/ubuntu/webtoon-scraper/docker-compose.yml
+- /mnt/nas_data/webtoon_download:/data      # 예전에는 끝에 :ro 가 붙어 있었음
+```
+
+**② 파일을 수정하는 라이브러리 옵션은 꺼두어야 합니다.** ⚠️ 이게 함정입니다. `:ro`를 떼는 순간 아래 옵션들이 **되살아나 다음 스캔 때 라이브러리 전체를 건드립니다.** `scanOnStartup=true`, `scanInterval=EVERY_6H` 이므로 컨테이너를 재시작하면 즉시 시작됩니다.
+
+| 옵션 | 원래 | 현재 | 켜져 있으면 |
+|---|---|---|---|
+| `convertToCbz` | true | **false** | 아카이브를 CBZ로 **재작성** |
+| `repairExtensions` | true | **false** | 확장자 불일치 파일을 **이름 변경** |
+| `emptyTrashAfterScan` | false | false | 스캔마다 휴지통 자동 비움 |
+
+```bash
+KEY=<API키>; LIB=0QGVD94Y5897Y
+curl -X PATCH -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"convertToCbz":false,"repairExtensions":false}' \
+  http://localhost:25600/api/v1/libraries/$LIB
+```
+
+**③ 삭제 후에도 목록에 남는 문제.** Komga는 삭제한 시리즈를 **휴지통에 `deleted=true`로 남깁니다.** 그래서 파일이 사라져도 카탈로그에 계속 보였습니다. 앱이 `deleted` 항목을 걸러내도록 수정했으므로 지금은 바로 사라집니다. 휴지통 자체를 비우려면:
+
+```bash
+curl -X POST -H "X-API-Key: $KEY" \
+  http://localhost:25600/api/v1/libraries/$LIB/empty-trash
+```
+
+> `empty-trash`는 **파일을 지우지 않습니다.** 이미 디스크에 없는 항목의 DB 레코드만 정리합니다. 실행 시 예전에 사라진 항목까지 함께 정리되어 시리즈 수가 예상보다 더 줄 수 있습니다(운영에서 3건 감소: 테스트 1건 + 이전에 파일이 사라졌던 2건).
+
 Komga 연결 진단:
 
 ```bash
@@ -633,7 +667,8 @@ npm run mobile:build:android
 - **앱 자체 인증 없음.** 삭제는 막혔지만 카탈로그 열람과 이미지 조회는 tailnet 경계에만 의존합니다. tailnet은 기기 단위로 인증된 사설망이므로 1인 사용에는 충분합니다. **인터넷에 노출하거나 남과 공유하게 되면** `src/proxy.ts`(Next 16에서 middleware의 새 이름) 기반 게이트나 인증 리버스 프록시가 필요합니다.
 - **`ADMIN_TOKEN`이 공유 비밀.** 사용자별 신원 구분이 없고, 회수하려면 값을 바꿔 재시작해야 합니다. 관리자 1인 구조에는 적정하지만, 여러 명이 쓰게 되면 계정 체계가 필요합니다.
 - **스테이징 없음.** 개발 서버가 곧 테스트 환경입니다. 5.2절의 `NEXT_DIST_DIR` 검증 빌드가 임시 대안입니다.
-- **삭제가 실제로 동작하는지 미확인.** Komga의 `/data`는 `:ro`(읽기 전용)로 마운트되어 있습니다. 그래서 시리즈 삭제가 파일까지 지우지 못하고 실패할 가능성이 있습니다. Komga가 비동기 `202`로 응답하는 탓에 호출 결과만으로는 알 수 없고, 확인하려면 실제로 한 건 지워봐야 하므로 검증하지 않았습니다.
+- **삭제가 이제 실제로 파일을 지웁니다.** 되돌릴 수 없으므로 `ADMIN_TOKEN`이 유일한 안전장치입니다(9.1~9.2절). 임시 시리즈를 만들어 삭제까지 검증했고, 실제 라이브러리는 건드리지 않았습니다.
+- **`convertToCbz` / `repairExtensions` 를 다시 켜지 마세요.** 껐기 때문에 파일이 그대로 유지됩니다. 다시 켜면 스캔이 라이브러리 전체를 재작성·이름변경합니다 (9.2절 ②).
 
 ### 이전 후 정리할 것
 
