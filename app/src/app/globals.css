@@ -641,6 +641,8 @@ img {
 .detailShell {
   display: grid;
   gap: 22px;
+  /* Room for the floating list navigation so it never sits on the last row. */
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
 }
 
 .detailTopNav {
@@ -728,6 +730,48 @@ img {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.episodeSubline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+/* The episode reading left off on: highlighted so it reads as the landing spot
+   after the list auto-scrolls to it. */
+.episodeRow.isResumeTarget {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.episodeRow.isResumeTarget:hover {
+  background: #cbe9e3;
+}
+
+.resumeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: #0b5c55;
+  background: var(--teal-soft);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.episodeRow.isResumeTarget .resumeBadge {
+  color: #ffffff;
+  background: var(--teal);
+}
+
+.posterMeta .resumeBadge {
+  justify-self: start;
 }
 
 .episodeMain small {
@@ -1097,6 +1141,17 @@ progress::-moz-progress-bar {
 
 .readerSideRail.visible {
   opacity: 1;
+}
+
+/* Top/bottom (and resume) jumps for long episode lists. */
+.listSideRail {
+  position: fixed;
+  right: 14px;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 40;
 }
 
 .sideRailButton {

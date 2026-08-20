@@ -3,9 +3,12 @@
 import {
   AlertTriangle,
   ArrowDownAZ,
+  Bookmark,
   BookOpen,
   CheckCircle2,
   ChevronLeft,
+  ChevronsDown,
+  ChevronsUp,
   CircleDot,
   Clock,
   Database,
@@ -23,10 +26,17 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appUrl } from "@/lib/app-url";
 import { loadAdminToken, saveAdminToken } from "@/lib/admin-token";
 import { loadHiddenSeries, saveHiddenSeries } from "@/lib/hidden-series";
+import {
+  getLastReadEntry,
+  loadReadingHistory,
+  saveReadingHistory,
+  withReadingRecorded,
+} from "@/lib/reading-history";
+import type { ReadingHistory, ReadingHistoryEntry } from "@/lib/reading-history";
 import type { Book, CatalogOverview, CatalogSource, ReaderMode, Series } from "@/lib/types";
 import { Reader } from "./reader";
 
@@ -83,6 +93,21 @@ function getContinueBook(books: Book[]) {
   );
 }
 
+/**
+ * The episode to land on when reopening a series: whatever was read last on
+ * this device, or — when that one is finished — the first unread episode after
+ * it. Falls back to Komga's own progress when there is no local history.
+ */
+function getResumeBook(books: Book[], entry?: ReadingHistoryEntry) {
+  const lastReadIndex = entry ? books.findIndex((book) => book.id === entry.bookId) : -1;
+  if (lastReadIndex < 0) return getContinueBook(books);
+
+  const lastRead = books[lastReadIndex];
+  if (lastRead.progress < 100) return lastRead;
+
+  return books.slice(lastReadIndex + 1).find((book) => book.progress < 100) ?? books[lastReadIndex + 1] ?? lastRead;
+}
+
 function getSeriesProgressPercent(series: Series, books: Book[] = []) {
   if (books.length > 0) {
     const total = books.reduce((sum, book) => sum + clampProgress(book.progress), 0);
@@ -111,9 +136,10 @@ function getBookProgressLabel(book: Book) {
   return total > 0 ? `${total}쪽` : "쪽수 정보 없음";
 }
 
-function getContinueActionLabel(book?: Book, fallbackProgress = 0) {
+function getContinueActionLabel(book?: Book, fallbackProgress = 0, hasHistory = false) {
   if (book?.progress && book.progress > 0 && book.progress < 100) return "이어서 읽기";
-  if (!book && fallbackProgress > 0 && fallbackProgress < 100) return "이어서 읽기";
+  // Episodes are not loaded on the browse screen, so local history stands in.
+  if (!book && (hasHistory || (fallbackProgress > 0 && fallbackProgress < 100))) return "이어서 읽기";
   if (book?.progress && book.progress >= 100) return "다시 읽기";
   return "읽기 시작";
 }
@@ -167,11 +193,26 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   const [adminToken, setAdminToken] = useState("");
   const [deletingSeriesId, setDeletingSeriesId] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  const [readingHistory, setReadingHistory] = useState<ReadingHistory>({});
+  const episodeRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const seriesBooksByIdRef = useRef<Record<string, Book[]>>({});
+  const episodeScrollTargetRef = useRef("");
 
   useEffect(() => {
     setHiddenSeriesIds(new Set(loadHiddenSeries()));
     setAdminToken(loadAdminToken());
+    setReadingHistory(loadReadingHistory());
   }, []);
+
+  const recordReading = useCallback((read: { seriesId: string; bookId: string; page?: number }) => {
+    setReadingHistory((current) => {
+      const next = withReadingRecorded(current, read);
+      if (next !== current) saveReadingHistory(next);
+      return next;
+    });
+  }, []);
+
+  const lastReadSeriesId = getLastReadEntry(readingHistory)?.seriesId ?? "";
 
   const selectedLibrary = catalog.libraries.find((item) => item.id === selectedLibraryId) ?? catalog.libraries[0];
 
@@ -189,7 +230,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
       return inLibrary && matchesQuery;
     });
 
-    return [...filtered].sort((left, right) => {
+    const sorted = [...filtered].sort((left, right) => {
       if (seriesSortMode === "name") {
         return left.title.localeCompare(right.title, "ko");
       }
@@ -197,7 +238,26 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
       const latestDiff = getSeriesTimestamp(right) - getSeriesTimestamp(left);
       return latestDiff || left.title.localeCompare(right.title, "ko");
     });
-  }, [catalog.series, deletedSeriesIds, hiddenSeriesIds, query, selectedLibrary?.id, seriesSortMode, showHidden]);
+
+    // Pin the webtoon this device was last reading so it is the first thing on
+    // screen (and the hero) on the next visit, whatever the sort mode is.
+    const pinnedIndex = lastReadSeriesId ? sorted.findIndex((item) => item.id === lastReadSeriesId) : -1;
+    if (pinnedIndex > 0) {
+      const [pinned] = sorted.splice(pinnedIndex, 1);
+      sorted.unshift(pinned);
+    }
+
+    return sorted;
+  }, [
+    catalog.series,
+    deletedSeriesIds,
+    hiddenSeriesIds,
+    lastReadSeriesId,
+    query,
+    selectedLibrary?.id,
+    seriesSortMode,
+    showHidden,
+  ]);
 
   const hiddenCount = useMemo(
     () =>
@@ -222,7 +282,10 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
       ? selectedSeriesBooks[selectedBookIndex + 1]
       : undefined;
   const primaryBook =
-    getContinueBook(selectedSeriesBooks) ?? selectedSeriesBooks.find((book) => book.id === selectedSeries?.primaryBookId);
+    getResumeBook(selectedSeriesBooks, readingHistory[selectedSeriesKey]) ??
+    selectedSeriesBooks.find((book) => book.id === selectedSeries?.primaryBookId);
+  const resumeBookId = primaryBook?.id ?? "";
+  const firstEpisodeId = selectedSeriesBooks[0]?.id ?? "";
   const completedBookCount =
     selectedBooksState === "ready"
       ? selectedSeriesBooks.filter((book) => book.progress >= 100).length
@@ -231,7 +294,8 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   const featuredSeries = visibleSeries[0] ?? selectedSeries;
   const featuredBooks = featuredSeries ? seriesBooksById[featuredSeries.id] ?? [] : [];
   const featuredBook =
-    getContinueBook(featuredBooks) ?? featuredBooks.find((book) => book.id === featuredSeries?.primaryBookId);
+    getResumeBook(featuredBooks, featuredSeries ? readingHistory[featuredSeries.id] : undefined) ??
+    featuredBooks.find((book) => book.id === featuredSeries?.primaryBookId);
   const featuredProgress = featuredSeries ? getSeriesProgressPercent(featuredSeries, featuredBooks) : 0;
   const featuredState = featuredSeries ? bookStateBySeriesId[featuredSeries.id] ?? "idle" : "idle";
   const selectedSeriesIsLoading = selectedBooksState === "idle" || selectedBooksState === "loading";
@@ -296,13 +360,49 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
 
       return changed ? (Object.fromEntries(nextEntries) as Record<string, Book[]>) : current;
     });
-  }, []);
+
+    const owningSeriesId = Object.entries(seriesBooksByIdRef.current).find(([, books]) =>
+      books.some((book) => book.id === update.bookId),
+    )?.[0];
+
+    if (owningSeriesId) {
+      recordReading({ seriesId: owningSeriesId, bookId: update.bookId, page: update.page });
+    }
+  }, [recordReading]);
 
   useEffect(() => {
     if ((view === "series" || view === "reader") && selectedSeriesKey) {
       void loadSeriesBooks(selectedSeriesKey);
     }
   }, [loadSeriesBooks, selectedSeriesKey, view]);
+
+  useEffect(() => {
+    seriesBooksByIdRef.current = seriesBooksById;
+  }, [seriesBooksById]);
+
+  // Bring the episode list to where reading left off instead of making the
+  // reader scroll for it. Re-runs whenever the resume target changes.
+  useEffect(() => {
+    if (view !== "series") {
+      episodeScrollTargetRef.current = "";
+      return;
+    }
+
+    if (selectedBooksState !== "ready" || !resumeBookId) return;
+
+    const target = `${selectedSeriesKey}:${resumeBookId}`;
+    if (episodeScrollTargetRef.current === target) return;
+    episodeScrollTargetRef.current = target;
+
+    const isFirstEpisode = firstEpisodeId === resumeBookId;
+    requestAnimationFrame(() => {
+      if (isFirstEpisode) {
+        window.scrollTo({ top: 0, behavior: "auto" });
+        return;
+      }
+      episodeRowRefs.current[resumeBookId]?.scrollIntoView({ block: "center", behavior: "auto" });
+    });
+  }, [firstEpisodeId, resumeBookId, selectedBooksState, selectedSeriesKey, view]);
 
   function selectLibrary(libraryId: string) {
     setSelectedLibraryId(libraryId);
@@ -329,10 +429,22 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   }
 
   function openBook(book: Book, options: OpenBookOptions = {}) {
+    const startPage = options.resume ? getBookResumePage(book) : 0;
     setSelectedBookId(book.id);
-    setReaderStartPage(options.resume ? getBookResumePage(book) : 0);
+    setReaderStartPage(startPage);
     setModeOverride("auto");
     setView("reader");
+    recordReading({ seriesId: book.seriesId, bookId: book.id, page: startPage });
+  }
+
+  function scrollPageTo(position: "top" | "bottom") {
+    const top = position === "top" ? 0 : document.documentElement.scrollHeight;
+    window.scrollTo({ top, behavior: "smooth" });
+  }
+
+  function scrollToResumeEpisode() {
+    if (!resumeBookId) return;
+    episodeRowRefs.current[resumeBookId]?.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   function setSeriesHidden(seriesId: string, hidden: boolean) {
@@ -405,7 +517,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
     setModeOverride("auto");
 
     const books = await loadSeriesBooks(series.id);
-    const book = getContinueBook(books) ?? books.find((item) => item.id === series.primaryBookId);
+    const book = getResumeBook(books, readingHistory[series.id]) ?? books.find((item) => item.id === series.primaryBookId);
 
     if (book) {
       openBook(book, { resume: true });
@@ -541,7 +653,11 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                     {featuredSeries.bookCount > 0 ? (
                       <button className="secondaryAction" onClick={() => void openPrimaryBook(featuredSeries)} type="button">
                         {featuredState === "loading" && !featuredBook ? <Loader2 size={17} /> : <Play size={17} />}
-                        {getContinueActionLabel(featuredBook, featuredProgress)}
+                        {getContinueActionLabel(
+                          featuredBook,
+                          featuredProgress,
+                          Boolean(featuredSeries && readingHistory[featuredSeries.id]),
+                        )}
                       </button>
                     ) : null}
                   </div>
@@ -669,6 +785,12 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                             <small>{item.subtitle || `${item.bookCount}개 회차`}</small>
                             <small>{formatSeriesUpdatedAt(item.updatedAt)}</small>
                           </span>
+                          {item.id === lastReadSeriesId ? (
+                            <span className="resumeBadge">
+                              <Bookmark size={13} />
+                              마지막으로 읽던 작품
+                            </span>
+                          ) : null}
                           <ProgressMeter label={getProgressLabel(itemProgress)} value={itemProgress} />
                           <span className="posterTags">
                             {item.tags.slice(0, 2).map((tag) => (
@@ -806,11 +928,18 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
               <div className="episodeList">
                 {selectedSeriesBooks.map((book) => {
                   const resume = book.progress > 0 && book.progress < 100;
+                  const isResumeTarget = book.id === resumeBookId;
                   return (
                     <button
-                      className="episodeRow"
+                      className={`episodeRow ${isResumeTarget ? "isResumeTarget" : ""}`}
                       key={book.id}
                       onClick={() => openBook(book, { resume })}
+                      ref={(node) => {
+                        episodeRowRefs.current[book.id] = node;
+                        return () => {
+                          delete episodeRowRefs.current[book.id];
+                        };
+                      }}
                       type="button"
                     >
                       <span className="episodeIcon">
@@ -818,7 +947,15 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                       </span>
                       <span className="episodeMain">
                         <strong>{book.title}</strong>
-                        <small>{book.updatedAt}</small>
+                        <span className="episodeSubline">
+                          <small>{book.updatedAt}</small>
+                          {isResumeTarget ? (
+                            <small className="resumeBadge">
+                              <Bookmark size={12} />
+                              {readingHistory[selectedSeriesKey]?.bookId === book.id ? "마지막으로 읽던 회차" : "이어볼 회차"}
+                            </small>
+                          ) : null}
+                        </span>
                       </span>
                       <span className="pageCount">{getBookProgressLabel(book)}</span>
                       <ProgressMeter className="episodeProgress" label={getProgressLabel(book.progress)} value={book.progress} />
@@ -834,6 +971,38 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
               </div>
             )}
           </section>
+
+          <nav aria-label="회차 목록 이동" className="listSideRail">
+            <button
+              aria-label="맨 위로"
+              className="sideRailButton"
+              onClick={() => scrollPageTo("top")}
+              title="맨 위로"
+              type="button"
+            >
+              <ChevronsUp size={20} />
+            </button>
+            {resumeBookId ? (
+              <button
+                aria-label="이어볼 회차로"
+                className="sideRailButton"
+                onClick={scrollToResumeEpisode}
+                title="이어볼 회차로"
+                type="button"
+              >
+                <Bookmark size={18} />
+              </button>
+            ) : null}
+            <button
+              aria-label="맨 아래로"
+              className="sideRailButton"
+              onClick={() => scrollPageTo("bottom")}
+              title="맨 아래로"
+              type="button"
+            >
+              <ChevronsDown size={20} />
+            </button>
+          </nav>
         </div>
       )}
 
