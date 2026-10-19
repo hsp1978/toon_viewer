@@ -50,6 +50,8 @@ type AppView = "browse" | "series" | "reader";
 type SeriesBooksState = "idle" | "loading" | "ready" | "error";
 type SeriesViewMode = "grid" | "list";
 type SeriesSortMode = "latest" | "name";
+type ShelfTab = "ongoing" | "ended";
+type PendingEndedChange = { series: Series; ended: boolean };
 type OpenBookOptions = { resume?: boolean };
 type ReaderProgressUpdate = { bookId: string; page: number; progress: number; completed: boolean };
 
@@ -189,6 +191,11 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
   const [hiddenSeriesIds, setHiddenSeriesIds] = useState<Set<string>>(new Set());
   const [deletedSeriesIds, setDeletedSeriesIds] = useState<Set<string>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+  const [shelfTab, setShelfTab] = useState<ShelfTab>("ongoing");
+  const [endedOverrides, setEndedOverrides] = useState<Record<string, boolean>>({});
+  const [pendingEnded, setPendingEnded] = useState<PendingEndedChange | null>(null);
+  const [savingEndedId, setSavingEndedId] = useState("");
+  const [endedError, setEndedError] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Series | null>(null);
   const [adminToken, setAdminToken] = useState("");
   const [deletingSeriesId, setDeletingSeriesId] = useState("");
@@ -216,7 +223,14 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
 
   const selectedLibrary = catalog.libraries.find((item) => item.id === selectedLibraryId) ?? catalog.libraries[0];
 
-  const visibleSeries = useMemo(() => {
+  const isSeriesEnded = useCallback(
+    (item: Series) => endedOverrides[item.id] ?? item.ended,
+    [endedOverrides],
+  );
+
+  // Everything in the library that passes search/hidden filters, before the
+  // 구독중/완결 split, so both tab counts and the hero come from the same list.
+  const shelfSeries = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     const filtered = catalog.series.filter((item) => {
       if (deletedSeriesIds.has(item.id)) return false;
@@ -259,6 +273,13 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
     showHidden,
   ]);
 
+  const endedShelfCount = useMemo(() => shelfSeries.filter(isSeriesEnded).length, [isSeriesEnded, shelfSeries]);
+  const ongoingShelfCount = shelfSeries.length - endedShelfCount;
+  const visibleSeries = useMemo(
+    () => shelfSeries.filter((item) => isSeriesEnded(item) === (shelfTab === "ended")),
+    [isSeriesEnded, shelfSeries, shelfTab],
+  );
+
   const hiddenCount = useMemo(
     () =>
       catalog.series.filter(
@@ -291,7 +312,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
       ? selectedSeriesBooks.filter((book) => book.progress >= 100).length
       : selectedSeries?.completedBookCount ?? 0;
   const selectedSeriesProgress = selectedSeries ? getSeriesProgressPercent(selectedSeries, selectedSeriesBooks) : 0;
-  const featuredSeries = visibleSeries[0] ?? selectedSeries;
+  const featuredSeries = shelfSeries[0] ?? selectedSeries;
   const featuredBooks = featuredSeries ? seriesBooksById[featuredSeries.id] ?? [] : [];
   const featuredBook =
     getResumeBook(featuredBooks, featuredSeries ? readingHistory[featuredSeries.id] : undefined) ??
@@ -511,6 +532,55 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
     }
   }
 
+  function requestSeriesEnded(series: Series, ended: boolean) {
+    setEndedError("");
+    if (adminToken.trim()) {
+      void saveSeriesEnded(series, ended, adminToken.trim());
+    } else {
+      setPendingEnded({ series, ended });
+    }
+  }
+
+  async function saveSeriesEnded(series: Series, ended: boolean, token: string) {
+    if (!token) {
+      setEndedError("관리자 토큰을 입력해 주세요.");
+      return;
+    }
+
+    setSavingEndedId(series.id);
+    setEndedError("");
+
+    try {
+      const response = await fetch(appUrl(`/api/komga/series/${encodeURIComponent(series.id)}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "X-Admin-Token": token },
+        body: JSON.stringify({ ended }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        if (response.status === 403) {
+          saveAdminToken("");
+          setAdminToken("");
+          throw new Error("관리자 토큰이 올바르지 않습니다.");
+        }
+        if (response.status === 503) {
+          throw new Error("서버에 ADMIN_TOKEN이 설정되지 않아 변경이 비활성화되어 있습니다.");
+        }
+        throw new Error(payload.error ?? `Update returned ${response.status}`);
+      }
+
+      saveAdminToken(token);
+      setEndedOverrides((current) => ({ ...current, [series.id]: ended }));
+      setPendingEnded(null);
+    } catch (error) {
+      // Keep the dialog (or open it) so the token can be fixed and retried.
+      setPendingEnded({ series, ended });
+      setEndedError(error instanceof Error ? error.message : "변경에 실패했습니다. 다시 시도해 주세요.");
+    } finally {
+      setSavingEndedId("");
+    }
+  }
+
   async function openPrimaryBook(series: Series) {
     setSelectedSeriesId(series.id);
     setSelectedLibraryId(series.libraryId);
@@ -687,6 +757,29 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
           </section>
 
           <section className="catalogSection" aria-label="Catalog">
+            <div className="shelfTabs" role="tablist" aria-label="연재 상태">
+              <button
+                aria-selected={shelfTab === "ongoing"}
+                className={`shelfTab ${shelfTab === "ongoing" ? "active" : ""}`}
+                onClick={() => setShelfTab("ongoing")}
+                role="tab"
+                type="button"
+              >
+                구독중
+                <strong>{ongoingShelfCount}</strong>
+              </button>
+              <button
+                aria-selected={shelfTab === "ended"}
+                className={`shelfTab ${shelfTab === "ended" ? "active" : ""}`}
+                onClick={() => setShelfTab("ended")}
+                role="tab"
+                type="button"
+              >
+                완결
+                <strong>{endedShelfCount}</strong>
+              </button>
+            </div>
+
             <div className="catalogSectionHeader">
               <div>
                 <span className="eyebrow">작품</span>
@@ -759,6 +852,7 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                 {visibleSeries.map((item) => {
                   const itemProgress = getSeriesProgressPercent(item, seriesBooksById[item.id] ?? []);
                   const itemHidden = hiddenSeriesIds.has(item.id);
+                  const itemEnded = isSeriesEnded(item);
                   return (
                     <div
                       className={`posterCardWrap ${seriesViewMode === "list" ? "listCardWrap" : ""} ${itemHidden ? "isHidden" : ""}`}
@@ -803,6 +897,22 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                       </button>
                       <div className="posterActions">
                         <button
+                          aria-label={itemEnded ? "구독중으로 되돌리기" : "완결로 표시"}
+                          className="posterActionButton"
+                          disabled={savingEndedId === item.id}
+                          onClick={() => requestSeriesEnded(item, !itemEnded)}
+                          title={itemEnded ? "구독중으로 되돌리기" : "완결로 표시"}
+                          type="button"
+                        >
+                          {savingEndedId === item.id ? (
+                            <Loader2 size={16} />
+                          ) : itemEnded ? (
+                            <CircleDot size={16} />
+                          ) : (
+                            <CheckCircle2 size={16} />
+                          )}
+                        </button>
+                        <button
                           aria-label={itemHidden ? "숨김 해제" : "목록에서 숨기기"}
                           className="posterActionButton"
                           onClick={() => setSeriesHidden(item.id, !itemHidden)}
@@ -828,8 +938,22 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
             ) : (
               <div className="noResults">
                 <Search size={28} />
-                <h3>검색 결과가 없습니다</h3>
-                <p>다른 제목이나 태그로 다시 검색해 주세요.</p>
+                {query.trim() ? (
+                  <>
+                    <h3>검색 결과가 없습니다</h3>
+                    <p>다른 제목이나 태그로 다시 검색해 주세요.</p>
+                  </>
+                ) : shelfTab === "ended" ? (
+                  <>
+                    <h3>완결된 작품이 없습니다</h3>
+                    <p>작품 카드나 상세 화면에서 완결로 표시하면 여기로 옮겨집니다.</p>
+                  </>
+                ) : (
+                  <>
+                    <h3>구독 중인 작품이 없습니다</h3>
+                    <p>완결 탭에서 작품을 확인해 보세요.</p>
+                  </>
+                )}
               </div>
             )}
           </section>
@@ -879,8 +1003,8 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                   <small>완독</small>
                 </span>
                 <span>
-                  <strong>{selectedSeries.status}</strong>
-                  <small>상태</small>
+                  <strong>{isSeriesEnded(selectedSeries) ? "완결" : "연재중"}</strong>
+                  <small>연재</small>
                 </span>
               </div>
               <ProgressMeter
@@ -898,6 +1022,21 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
                 <button className="secondaryAction" onClick={() => setView("browse")} type="button">
                   <Search size={17} />
                   다른 작품
+                </button>
+                <button
+                  className="secondaryAction"
+                  disabled={savingEndedId === selectedSeries.id}
+                  onClick={() => requestSeriesEnded(selectedSeries, !isSeriesEnded(selectedSeries))}
+                  type="button"
+                >
+                  {savingEndedId === selectedSeries.id ? (
+                    <Loader2 size={17} />
+                  ) : isSeriesEnded(selectedSeries) ? (
+                    <CircleDot size={17} />
+                  ) : (
+                    <CheckCircle2 size={17} />
+                  )}
+                  {isSeriesEnded(selectedSeries) ? "구독중으로 되돌리기" : "완결로 표시"}
                 </button>
               </div>
             </div>
@@ -1060,6 +1199,63 @@ export function CatalogShell({ catalog, source, warning }: CatalogShellProps) {
               >
                 {deletingSeriesId ? <Loader2 size={17} /> : <Trash2 size={17} />}
                 삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingEnded ? (
+        <div
+          className="modalOverlay"
+          onClick={() => {
+            if (!savingEndedId) setPendingEnded(null);
+          }}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="modalCard"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="modalIcon">
+              {pendingEnded.ended ? <CheckCircle2 size={26} /> : <CircleDot size={26} />}
+            </div>
+            <h3>{pendingEnded.ended ? "완결로 표시할까요?" : "구독중으로 되돌릴까요?"}</h3>
+            <p>
+              <strong>{pendingEnded.series.title}</strong>의 연재 상태를 Komga에{" "}
+              <strong>{pendingEnded.ended ? "완결" : "연재중"}</strong>으로 저장합니다. 모든 기기에 함께 반영됩니다.
+            </p>
+            <label className="modalField">
+              <span>관리자 토큰</span>
+              <input
+                autoComplete="off"
+                disabled={Boolean(savingEndedId)}
+                onChange={(event) => setAdminToken(event.target.value)}
+                placeholder="서버의 ADMIN_TOKEN"
+                type="password"
+                value={adminToken}
+              />
+            </label>
+            {endedError ? <p className="modalError">{endedError}</p> : null}
+            <div className="modalActions">
+              <button
+                className="secondaryAction"
+                disabled={Boolean(savingEndedId)}
+                onClick={() => setPendingEnded(null)}
+                type="button"
+              >
+                취소
+              </button>
+              <button
+                className="primaryAction"
+                disabled={Boolean(savingEndedId)}
+                onClick={() => void saveSeriesEnded(pendingEnded.series, pendingEnded.ended, adminToken.trim())}
+                type="button"
+              >
+                {savingEndedId ? <Loader2 size={17} /> : <CheckCircle2 size={17} />}
+                저장
               </button>
             </div>
           </div>

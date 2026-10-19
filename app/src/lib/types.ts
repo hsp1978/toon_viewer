@@ -31,6 +31,8 @@ export type Series = {
   title: string;
   subtitle: string;
   status: "Reading" | "Queued" | "Complete";
+  /** Publication has finished (Komga series status ENDED), not "read to the end". */
+  ended: boolean;
   tags: string[];
   coverSrc: string;
   bookIds: string[];

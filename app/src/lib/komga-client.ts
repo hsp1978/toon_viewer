@@ -301,6 +301,7 @@ function normalizeSeries(record: UnknownRecord, books: Book[], includeBookIds = 
     title,
     subtitle: getString(metadata.summary, `${bookCount}개 회차`),
     status: complete ? "Complete" : reading ? "Reading" : "Queued",
+    ended: getString(metadata.status) === "ENDED",
     tags,
     coverSrc: `/api/komga/series/${encodeURIComponent(id)}/thumbnail`,
     bookIds: includeBookIds ? bookIds : [],
@@ -443,6 +444,23 @@ export async function deleteKomgaSeries(seriesId: string) {
   await komgaFetch(
     `/api/v1/series/${encodeURIComponent(seriesId)}/file`,
     { method: "DELETE" },
+    config,
+  );
+
+  return { ok: true, mode: "komga" as const };
+}
+
+export async function setKomgaSeriesEnded(seriesId: string, ended: boolean) {
+  const config = getKomgaConfig();
+  if (config.forceMock || !config.baseUrl) {
+    return { ok: true, mode: "mock" as const };
+  }
+
+  // Lock the field while it is ENDED so a library rescan or metadata refresh
+  // cannot quietly put a finished series back on the ongoing shelf.
+  await patchJson(
+    `/api/v1/series/${encodeURIComponent(seriesId)}/metadata`,
+    { status: ended ? "ENDED" : "ONGOING", statusLock: ended },
     config,
   );
 

@@ -470,6 +470,50 @@ img {
   background: var(--surface-soft);
 }
 
+.shelfTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.shelfTab {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.shelfTab strong {
+  min-width: 28px;
+  min-height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+
+.shelfTab.active {
+  border-bottom-color: var(--teal);
+  color: var(--ink);
+}
+
+.shelfTab.active strong {
+  color: var(--teal);
+  background: var(--teal-soft);
+}
+
 .seriesShelf {
   display: grid;
   gap: 16px;
