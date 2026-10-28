@@ -309,6 +309,53 @@ sudo systemctl edit docker.service
 
 이 설정을 넣지 않아도 `127.0.0.1` 바인딩은 항상 성공하므로 **앱 자체는 부팅 직후에도 정상 동작합니다.** 영향받는 것은 tailnet에서의 Komga UI 접근뿐입니다.
 
+### 4.5.2 라이브러리 경로와 빈 마운트 보호 (적용 완료)
+
+2026-10-28에 웹툰 다운로드 경로가 NAS의 SSD 볼륨으로 옮겨졌습니다.
+
+| | 호스트 경로 | Komga 안 |
+|---|---|---|
+| 이전 | `/mnt/nas_data/webtoon_download` | `/data` |
+| 현재 | `/mnt/SSD/webtoon_download` (NFS, `192.168.219.99:/volume2/SSD`) | `/data` |
+
+앱은 파일 경로를 직접 쓰지 않고 Komga API만 부르므로 **앱 쪽 설정은 바뀔 것이 없습니다.** Komga 라이브러리 루트도 `file:/data/` 그대로입니다.
+
+**사고 기록.** 경로를 옮기면서 Komga를 재시작했을 때, SSD 복사가 덜 끝난 상태에서 시작 스캔(`scanOnStartup=true`)이 돌았습니다. Komga는 보이지 않는 시리즈 214개·책 19,280권을 휴지통으로 보냈고, 앱은 휴지통 항목을 숨기므로 카탈로그에 11개만 남았습니다. health는 휴지통까지 세기 때문에 `ok:true`로 보였습니다.
+
+Komga가 빈 `/data`를 보는 상황은 재부팅 때도 생길 수 있습니다. `/mnt/SSD`는 `nofail` NFS 마운트라, NAS가 늦게 붙으면 docker가 빈 디렉터리를 마운트한 채 Komga를 띄웁니다. 그래서 Komga 시작 전에 `/data`가 비어 있으면 종료하도록 했습니다. `restart: always`가 재시도하므로 마운트가 붙으면 스스로 올라옵니다.
+
+```yaml
+# /home/ubuntu/webtoon-scraper/docker-compose.yml (komga)
+    entrypoint:
+      - sh
+      - -c
+      - 'if [ -z "$$(ls -A /data 2>/dev/null)" ]; then echo "komga: /data is empty - library not mounted, refusing to start" >&2; sleep 10; exit 1; fi; exec "$$@"'
+      - komga-guard
+    command: ["java", "-Dspring.profiles.include=docker", "--enable-native-access=ALL-UNNAMED", "-jar", "application.jar", "--spring.config.additional-location=file:/config/"]
+```
+
+> ⚠️ `command`는 이미지 기본 ENTRYPOINT를 그대로 옮겨 적은 것입니다. 이미지가 `gotson/komga:latest`이므로 **업데이트 후 Komga가 뜨지 않으면** `docker inspect gotson/komga:latest --format '{{json .Config.Entrypoint}}'`로 바뀌었는지 보세요.
+
+막히고 있는지 확인:
+
+```bash
+docker logs komga 2>&1 | grep refusing      # 마운트 대기 중이면 이 줄이 반복됨
+```
+
+이 보호가 막지 못하는 것은 **마운트는 붙었지만 내용이 일부만 있는 경우**입니다. 경로를 옮기거나 대량 복사할 때는 복사가 끝난 뒤에 Komga를 재시작하세요.
+
+**휴지통으로 간 경우 복구.** 파일이 제자리에 돌아온 뒤 라이브러리를 스캔하면 됩니다. **그 전에 휴지통을 비우지 마세요**(`empty-trash`, `emptyTrashAfterScan`). 비우면 읽기 진행률이 영구히 사라집니다.
+
+```bash
+curl -X POST -H "X-API-Key: $KEY" http://localhost:25600/api/v1/libraries/$LIB/scan
+```
+
+Komga는 휴지통 항목을 그대로 되살리지 않고, **새 ID로 시리즈·책을 만든 뒤** 파일 해시가 같은 옛 항목의 읽기 진행률과 메타데이터를 옮기고 옛 행을 지웁니다. 이번에는 225개 시리즈 복구에 약 55분이 걸렸고, 결과는 다음과 같았습니다.
+
+- 읽기 진행률 3,129건 중 3,070건 이전. 나머지는 옛 항목과 짝이 맞지 않은 시리즈의 것
+- 완결(`ENDED`) 표시 98건 중 89건은 Komga가 옮겼고, 짝이 맞지 않은 9건은 스냅샷을 보고 다시 설정. 휴지통 행은 복구 중에 지워지므로 **스캔 전에 상태를 떠 두어야** 합니다. 스냅샷과 스크립트: `/home/ubuntu/webtoon-scraper/backups/trashed-series-snapshot-20261029.tsv`, `restore-ended.py`
+- 시리즈 ID가 바뀌므로 브라우저 `localStorage`에 ID로 저장된 **숨긴 시리즈 목록과 '바로 이어보기' 기록은 이어지지 않습니다.** 숨김은 다시 지정해야 하고, 이어보기는 작품을 한 번 열면 다시 쌓입니다.
+
 ### 4.6 systemd 서비스 등록
 
 개발 서버에 등록된 유닛(`~/.config/systemd/user/panelshift.service`)을 운영 서버용으로 옮깁니다. 아래 3개 값을 환경에 맞게 고치세요.
@@ -570,14 +617,20 @@ UI에서는 삭제 확인창에 토큰 입력란이 나옵니다. 서버가 수�
 
 ### 9.2 삭제가 실제로 파일을 지우기까지 필요한 조건
 
-삭제 기능은 앱만으로 완성되지 않습니다. Komga 쪽 조건이 세 가지 맞아야 합니다. **현재 운영 서버는 셋 다 충족된 상태이며 실제 삭제까지 검증했습니다.**
+삭제 기능은 앱만으로 완성되지 않습니다. Komga 쪽 조건이 세 가지 맞아야 합니다. 이전 경로(`/mnt/nas_data`)에서는 셋 다 충족해 실제 삭제까지 검증했지만, **SSD로 옮긴 뒤로는 ①이 깨져 있습니다**(아래).
 
-**① `/data` 마운트가 쓰기 가능해야 합니다.** 원래 `:ro`였고, 그 상태에서는 파일이 지워지지 않습니다.
+**① Komga(uid 1000)가 `/data`에 쓸 수 있어야 합니다.** 원래 마운트가 `:ro`였고, 그 상태에서는 파일이 지워지지 않습니다.
 
 ```yaml
 # /home/ubuntu/webtoon-scraper/docker-compose.yml
-- /mnt/nas_data/webtoon_download:/data      # 예전에는 끝에 :ro 가 붙어 있었음
+- /mnt/SSD/webtoon_download:/data      # :ro 를 붙이지 말 것
 ```
+
+> ⚠️ **현재 상태(2026-10-29): 삭제해도 파일이 남습니다.** 마운트는 쓰기 가능하지만 SSD로 복사된 폴더가 모두 `555`(`dr-xr-xr-x`)라 uid 1000이 지울 수 없습니다. 앱의 삭제는 Komga 목록에서만 빠지고 파일은 그대로 남습니다. 스크레이퍼는 root로 돌아서 새 화 다운로드에는 영향이 없습니다. 삭제를 되살리려면 NAS 쪽에서 폴더를 `755` 이상으로 바꾸세요. 확인:
+>
+> ```bash
+> docker exec komga sh -c 'touch /data/.w && rm /data/.w && echo writable'
+> ```
 
 **② 파일을 수정하는 라이브러리 옵션은 꺼두어야 합니다.** ⚠️ 이게 함정입니다. `:ro`를 떼는 순간 아래 옵션들이 **되살아나 다음 스캔 때 라이브러리 전체를 건드립니다.** `scanOnStartup=true`, `scanInterval=EVERY_6H` 이므로 컨테이너를 재시작하면 즉시 시작됩니다.
 
@@ -654,6 +707,7 @@ npm run mobile:build:android
 - ✅ **파일 삭제 엔드포인트 무방비** → `ADMIN_TOKEN` 게이트 추가, 미설정 시 fail-closed (9.1절)
 - ✅ **mock 빌드 함정** → `CATALOG_MODE` 런타임 변수 도입. 잘못 구워진 빌드도 재빌드 없이 복구 (3.1.1절)
 - ✅ **헬스체크가 얕음** → 라이브러리·시리즈 개수까지 확인하고, 시리즈가 0이면 `ok:false` 반환
+- ✅ **NAS 마운트 전에 Komga가 떠서 라이브러리를 휴지통으로 보냄** → `/data`가 비어 있으면 Komga가 시작하지 않도록 함 (4.5.2절)
 
 ### 남은 것
 
@@ -667,7 +721,9 @@ npm run mobile:build:android
 - **앱 자체 인증 없음.** 삭제는 막혔지만 카탈로그 열람과 이미지 조회는 tailnet 경계에만 의존합니다. tailnet은 기기 단위로 인증된 사설망이므로 1인 사용에는 충분합니다. **인터넷에 노출하거나 남과 공유하게 되면** `src/proxy.ts`(Next 16에서 middleware의 새 이름) 기반 게이트나 인증 리버스 프록시가 필요합니다.
 - **`ADMIN_TOKEN`이 공유 비밀.** 사용자별 신원 구분이 없고, 회수하려면 값을 바꿔 재시작해야 합니다. 관리자 1인 구조에는 적정하지만, 여러 명이 쓰게 되면 계정 체계가 필요합니다.
 - **스테이징 없음.** 개발 서버가 곧 테스트 환경입니다. 5.2절의 `NEXT_DIST_DIR` 검증 빌드가 임시 대안입니다.
-- **삭제가 이제 실제로 파일을 지웁니다.** 되돌릴 수 없으므로 `ADMIN_TOKEN`이 유일한 안전장치입니다(9.1~9.2절). 임시 시리즈를 만들어 삭제까지 검증했고, 실제 라이브러리는 건드리지 않았습니다.
+- **삭제는 파일을 지우도록 설계되어 있습니다.** 되돌릴 수 없으므로 `ADMIN_TOKEN`이 유일한 안전장치입니다(9.1~9.2절). 이전 경로에서 임시 시리즈로 검증했고, 현재 SSD 경로에서는 폴더 권한 때문에 파일이 지워지지 않습니다(9.2절 ①).
+- **health가 휴지통 항목까지 셉니다.** 라이브러리 대부분이 휴지통으로 가도 `ok:true`와 원래 시리즈 수가 나옵니다. 살아 있는 시리즈 수를 따로 내보내면 4.5.2절 같은 사고를 바로 알아챌 수 있습니다.
+- **docker가 NFS 마운트를 기다리지 않습니다.** 4.5.2절의 시작 검사가 Komga를 막지만, 스크레이퍼는 마운트 전에 뜨면 로컬 디스크의 빈 폴더에 내려받을 수 있습니다. sudo로 `sudo systemctl edit docker.service`에 `[Unit]` `RequiresMountsFor=/mnt/SSD`를 넣으면 근본적으로 막힙니다(NAS가 안 붙으면 docker 전체가 뜨지 않는다는 대가가 있음).
 - **`convertToCbz` / `repairExtensions` 를 다시 켜지 마세요.** 껐기 때문에 파일이 그대로 유지됩니다. 다시 켜면 스캔이 라이브러리 전체를 재작성·이름변경합니다 (9.2절 ②).
 
 ### 이전 후 정리할 것
