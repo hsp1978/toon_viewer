@@ -320,7 +320,7 @@ sudo systemctl edit docker.service
 
 앱은 파일 경로를 직접 쓰지 않고 Komga API만 부르므로 **앱 쪽 설정은 바뀔 것이 없습니다.** Komga 라이브러리 루트도 `file:/data/` 그대로입니다.
 
-**사고 기록.** 경로를 옮기면서 Komga를 재시작했을 때, SSD 복사가 덜 끝난 상태에서 시작 스캔(`scanOnStartup=true`)이 돌았습니다. Komga는 보이지 않는 시리즈 214개·책 19,280권을 휴지통으로 보냈고, 앱은 휴지통 항목을 숨기므로 카탈로그에 11개만 남았습니다. health는 휴지통까지 세기 때문에 `ok:true`로 보였습니다.
+**사고 기록.** 경로를 옮기면서 Komga를 재시작했을 때, SSD 복사가 덜 끝난 상태에서 시작 스캔(`scanOnStartup=true`)이 돌았습니다. Komga는 보이지 않는 시리즈 214개·책 19,280권을 휴지통으로 보냈고, 앱은 휴지통 항목을 숨기므로 카탈로그에 11개만 남았습니다. 당시 health는 휴지통까지 세서 `ok:true`로 보였고, 지금은 이런 상태면 `ok:false`를 냅니다(8장 3번).
 
 Komga가 빈 `/data`를 보는 상황은 재부팅 때도 생길 수 있습니다. `/mnt/SSD`는 `nofail` NFS 마운트라, NAS가 늦게 붙으면 docker가 빈 디렉터리를 마운트한 채 Komga를 띄웁니다. 그래서 Komga 시작 전에 `/data`가 비어 있으면 종료하도록 했습니다. `restart: always`가 재시도하므로 마운트가 붙으면 스스로 올라옵니다.
 
@@ -550,9 +550,11 @@ ss -tlnp | grep 3001                             # → 100.114.4.40:3001
 
 # 3. Komga 연결 + 모드 + 실제 콘텐츠 확인  ★ 가장 중요
 curl -s http://$HOST:3001/api/komga/health
-# 기대값: {"ok":true,"mode":"komga","status":200,"libraries":1,"series":218}
+# 기대값: {"ok":true,"mode":"komga","status":200,"libraries":1,"series":225,"trashed":22}
 # - mode가 "mock"      → 3장 함정. .env.local 배치 후 재빌드 (또는 3.1.1 응급 복구)
 # - series가 0         → ok:false 로 내려옵니다. 빈 Komga를 보고 있다는 뜻
+# - trashed > series   → ok:false. 라이브러리가 덜 마운트된 채 스캔된 것 (4.5.2절)
+#   series 는 서재에 보이는(휴지통 제외) 시리즈 수입니다
 # 헬스체크는 인증 통과뿐 아니라 실제 시리즈가 보이는지까지 확인하므로
 # 배포 게이트로 그대로 쓸 수 있습니다.
 
@@ -707,6 +709,7 @@ npm run mobile:build:android
 - ✅ **파일 삭제 엔드포인트 무방비** → `ADMIN_TOKEN` 게이트 추가, 미설정 시 fail-closed (9.1절)
 - ✅ **mock 빌드 함정** → `CATALOG_MODE` 런타임 변수 도입. 잘못 구워진 빌드도 재빌드 없이 복구 (3.1.1절)
 - ✅ **헬스체크가 얕음** → 라이브러리·시리즈 개수까지 확인하고, 시리즈가 0이면 `ok:false` 반환
+- ✅ **health가 휴지통 항목까지 셈** → `series`는 휴지통 제외, `trashed`를 따로 내보내고 휴지통이 더 많으면 `ok:false` (8장 3번)
 - ✅ **NAS 마운트 전에 Komga가 떠서 라이브러리를 휴지통으로 보냄** → `/data`가 비어 있으면 Komga가 시작하지 않도록 함 (4.5.2절)
 
 ### 남은 것
@@ -722,7 +725,6 @@ npm run mobile:build:android
 - **`ADMIN_TOKEN`이 공유 비밀.** 사용자별 신원 구분이 없고, 회수하려면 값을 바꿔 재시작해야 합니다. 관리자 1인 구조에는 적정하지만, 여러 명이 쓰게 되면 계정 체계가 필요합니다.
 - **스테이징 없음.** 개발 서버가 곧 테스트 환경입니다. 5.2절의 `NEXT_DIST_DIR` 검증 빌드가 임시 대안입니다.
 - **삭제는 파일을 지우도록 설계되어 있습니다.** 되돌릴 수 없으므로 `ADMIN_TOKEN`이 유일한 안전장치입니다(9.1~9.2절). 이전 경로에서 임시 시리즈로 검증했고, 현재 SSD 경로에서는 폴더 권한 때문에 파일이 지워지지 않습니다(9.2절 ①).
-- **health가 휴지통 항목까지 셉니다.** 라이브러리 대부분이 휴지통으로 가도 `ok:true`와 원래 시리즈 수가 나옵니다. 살아 있는 시리즈 수를 따로 내보내면 4.5.2절 같은 사고를 바로 알아챌 수 있습니다.
 - **docker가 NFS 마운트를 기다리지 않습니다.** 4.5.2절의 시작 검사가 Komga를 막지만, 스크레이퍼는 마운트 전에 뜨면 로컬 디스크의 빈 폴더에 내려받을 수 있습니다. sudo로 `sudo systemctl edit docker.service`에 `[Unit]` `RequiresMountsFor=/mnt/SSD`를 넣으면 근본적으로 막힙니다(NAS가 안 붙으면 docker 전체가 뜨지 않는다는 대가가 있음).
 - **`convertToCbz` / `repairExtensions` 를 다시 켜지 마세요.** 껐기 때문에 파일이 그대로 유지됩니다. 다시 켜면 스캔이 라이브러리 전체를 재작성·이름변경합니다 (9.2절 ②).
 

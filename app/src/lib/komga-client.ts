@@ -497,16 +497,30 @@ export async function checkKomgaConnection() {
     // be pointed at an empty or wrong Komga, so confirm real content is
     // visible — that is what makes this usable as a deploy gate.
     const libraries = getContentArray(await response.clone().json().catch(() => []));
-    const seriesPage = await getJson("/api/v1/series?size=1", config);
-    const totalSeries = isRecord(seriesPage) ? getNumber(seriesPage.totalElements, 0) : 0;
+    // Count live and trashed series separately. The shelf hides trashed ones,
+    // so a scan of a half-mounted library can empty the shelf while the
+    // combined total still looks normal (docs/deployment.md 4.5.2).
+    const [livePage, trashedPage] = await Promise.all([
+      getJson("/api/v1/series?size=1&deleted=false", config),
+      getJson("/api/v1/series?size=1&deleted=true", config),
+    ]);
+    const liveSeries = isRecord(livePage) ? getNumber(livePage.totalElements, 0) : 0;
+    const trashedSeries = isRecord(trashedPage) ? getNumber(trashedPage.totalElements, 0) : 0;
+    const warning =
+      liveSeries === 0
+        ? "Komga is reachable but exposes no series"
+        : trashedSeries > liveSeries
+          ? "More series are in Komga's trash than on the shelf; the library may not be fully mounted"
+          : undefined;
 
     return {
-      ok: response.ok && totalSeries > 0,
+      ok: response.ok && !warning,
       mode: "komga" as const,
       status: response.status,
       libraries: libraries.length,
-      series: totalSeries,
-      ...(totalSeries === 0 ? { warning: "Komga is reachable but exposes no series" } : {}),
+      series: liveSeries,
+      trashed: trashedSeries,
+      ...(warning ? { warning } : {}),
     };
   } catch (error) {
     return {
