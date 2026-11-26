@@ -26,15 +26,20 @@ const CONVERTIBLE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SAFE_PAGE = /^\d{1,6}$/;
 
-type Sharp = typeof import("sharp");
+// Only the calls used here. sharp arrives as Next's optional dependency, so
+// its version (and its type declarations) follow Next: 0.34 and 0.35 type the
+// module differently, and typing against either breaks the other's build.
+type Sharp = ((input: Buffer) => {
+  jpeg(options: typeof JPEG_OPTIONS): { toBuffer(): Promise<Buffer> };
+}) & { cache(enabled: boolean): unknown };
 let sharpPromise: Promise<Sharp | null> | undefined;
 
 function loadSharp() {
-  // Loaded lazily: sharp ships with Next as an optional dependency, and a host
-  // without it should still serve original pages rather than fail to boot.
+  // Loaded lazily: a host without sharp should still serve original pages
+  // rather than fail to boot.
   sharpPromise ??= import("sharp")
     .then((module): Sharp => {
-      const sharp = module.default;
+      const sharp = (module as unknown as { default: Sharp }).default;
       // Pages are converted once and then read from disk, so libvips' own
       // operation cache would only hold memory on a small host.
       sharp.cache(false);
@@ -45,7 +50,9 @@ function loadSharp() {
 }
 
 function cacheRoot() {
-  return process.env.PAGE_CACHE_DIR?.trim() || path.join(process.cwd(), ".page-cache");
+  // The ignore comment stops Turbopack's output tracing from treating the
+  // runtime cache path as a reason to bundle the whole project.
+  return process.env.PAGE_CACHE_DIR?.trim() || path.join(/* turbopackIgnore: true */ process.cwd(), ".page-cache");
 }
 
 /** Cache paths for a page, or undefined when the ids are not plain tokens (they end up in a path). */
@@ -77,7 +84,7 @@ async function withEncodeSlot<T>(task: () => Promise<T>) {
 export async function readConvertedPage(bookId: string, pageNumber: string) {
   const files = pageFiles(bookId, pageNumber);
   if (!files) return null;
-  const body = await readFile(files.converted).catch(() => null);
+  const body = await readFile(/* turbopackIgnore: true */ files.converted).catch(() => null);
   return body ? new Uint8Array(body) : null;
 }
 
@@ -93,7 +100,10 @@ export function convertPageInBackground(
   if (!files || inFlight.has(files.converted)) return;
 
   const job = (async () => {
-    const done = await Promise.any([access(files.converted), access(files.keepOriginal)]).then(
+    const done = await Promise.any([
+      access(/* turbopackIgnore: true */ files.converted),
+      access(/* turbopackIgnore: true */ files.keepOriginal),
+    ]).then(
       () => true,
       () => false,
     );
@@ -108,19 +118,19 @@ export function convertPageInBackground(
       const upstream = await fetchOriginal();
       const sourceType = upstream.headers.get("Content-Type")?.split(";")[0].trim() ?? "";
       const original = Buffer.from(await upstream.arrayBuffer());
-      await mkdir(path.dirname(files.converted), { recursive: true });
+      await mkdir(/* turbopackIgnore: true */ path.dirname(files.converted), { recursive: true });
 
       const encoded = CONVERTIBLE_TYPES.has(sourceType)
         ? await sharp(original).jpeg(JPEG_OPTIONS).toBuffer()
         : undefined;
       if (!encoded || encoded.length >= original.length) {
-        await writeFile(files.keepOriginal, "");
+        await writeFile(/* turbopackIgnore: true */ files.keepOriginal, "");
         return;
       }
 
       const temp = `${files.converted}.${process.pid}.${Date.now()}.tmp`;
-      await writeFile(temp, encoded);
-      await rename(temp, files.converted);
+      await writeFile(/* turbopackIgnore: true */ temp, encoded);
+      await rename(/* turbopackIgnore: true */ temp, files.converted);
     });
   })()
     .catch(() => undefined)
