@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# re-encoded reader pages (src/lib/page-image-cache.ts)
+/.page-cache/

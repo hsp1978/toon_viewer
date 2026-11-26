@@ -137,6 +137,7 @@ forceMock:"true"===process.env.KOMGA_FORCE_MOCK
 | `KOMGA_MAX_LIST_PAGES` | 런타임 | 카탈로그 조회 페이지 수 |
 | `KOMGA_BOOTSTRAP_BOOK_LIMIT` | 런타임 | 페이지 크기 선반영 대상 수 |
 | **`ADMIN_TOKEN`** | 런타임 | 시리즈 삭제에 필수. 미설정이면 삭제가 503으로 거부됩니다 (9.1절) |
+| `PAGE_CACHE_DIR` | 런타임 | 경량화한 회차 이미지 저장 위치. 기본값 `app/.page-cache` (9.3절) |
 
 **규칙: 빌드 전에 `.env.local`을 먼저 배치하세요.** 순서를 지키는 것만으로 이 함정 전체를 피할 수 있습니다.
 
@@ -592,6 +593,16 @@ loginctl show-user $USER --property=Linger        # → Linger=yes
 | 폰에서 접속 불가 | `127.0.0.1` 바인딩 | `--hostname`을 Tailscale IP 또는 `0.0.0.0`으로 변경 후 재시작 |
 | `/api/komga/health`가 `ok:false` | Komga 미도달 또는 키 무효 | 아래 진단 명령 참조 |
 | 코드를 고쳤는데 반영 안 됨 | 재빌드 누락 | `npm run build` 후 재시작. 유닛은 빌드를 하지 않습니다 |
+
+### 9.3 회차 이미지 경량화 캐시 (`PAGE_CACHE_DIR`)
+
+리더는 Komga 원본(JPEG q95, 장당 1~2MB) 대신 **해상도는 그대로 두고 mozjpeg q85·4:4:4로 다시 압축한 사본**을 보냅니다. 표본 기준 용량은 43~51% 줄고 PSNR은 37~42dB입니다. 구현은 `app/src/lib/page-image-cache.ts`에 있습니다.
+
+- **변환 시점:** 회차를 열면 그 회차와 다음 회차를 백그라운드에서 변환합니다(동시 2개). 아직 변환되지 않은 페이지는 **원본을 그대로** 보내므로 처음 보는 회차가 기존보다 느려지지는 않습니다.
+- **저장 위치:** `$PAGE_CACHE_DIR/q85-444/<bookId>/<page>.jpg`. `.keep` 파일은 원본이 더 작거나 변환할 수 없는 형식이라 원본을 쓰기로 한 페이지 표시입니다.
+- **정리:** 자동 삭제는 없습니다. 디스크가 부족하면 서비스를 켠 채로 `rm -rf ~/panelshift/app/.page-cache`를 실행하면 됩니다. 다음 열람 때 다시 만들어집니다. Komga에서 회차 파일을 교체한 경우에도 같은 방법으로 비우세요.
+- **sharp:** Next와 함께 설치되는 `sharp`를 씁니다. 불러오지 못하면 변환 없이 원본만 보냅니다.
+- **원본 보기:** 리더의 "원본 화질" 버튼을 켜면 `?quality=original`로 원본을 받습니다(기기별로 저장).
 
 ### 9.1 삭제 보호 (`ADMIN_TOKEN`)
 

@@ -395,6 +395,20 @@ export async function getKomgaBookPages(bookId: string) {
   return fetchBookPages(bookId, config);
 }
 
+/** The book after this one in its series, or undefined at the end (or in mock mode). */
+export async function getNextKomgaBookId(bookId: string) {
+  const config = getKomgaConfig();
+  if (config.forceMock || !config.baseUrl) return undefined;
+
+  try {
+    const record = await getJson(`/api/v1/books/${encodeURIComponent(bookId)}/next`, config);
+    return isRecord(record) ? getString(record.id) || undefined : undefined;
+  } catch {
+    // Komga answers 404 for the last book.
+    return undefined;
+  }
+}
+
 export async function getSeriesBooksSnapshot(seriesId: string): Promise<SeriesBooksSnapshot> {
   const config = getKomgaConfig();
   if (config.forceMock || !config.baseUrl) {

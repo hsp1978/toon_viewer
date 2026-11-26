@@ -9,6 +9,7 @@ import {
   ChevronsUp,
   Columns2,
   House,
+  ImageIcon,
   List,
   Maximize2,
   Minus,
@@ -20,6 +21,7 @@ import {
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appUrl } from "@/lib/app-url";
+import { loadOriginalQuality, saveOriginalQuality } from "@/lib/reader-preferences";
 import { clampPageIndex, getPagedWindow, inferReaderMode } from "@/lib/reader-mode";
 import type { Book, ComicPage, ReaderMode, Series } from "@/lib/types";
 
@@ -56,6 +58,10 @@ export function Reader({
   const [activeIndex, setActiveIndex] = useState(initialActiveIndex);
   const [spreadEnabled, setSpreadEnabled] = useState(true);
   const [zoom, setZoom] = useState(100);
+  // Pages are served re-encoded (~45% smaller) unless the reader opts out.
+  // The reader only mounts client-side after a tap, so reading storage here
+  // cannot mismatch server HTML.
+  const [originalQuality, setOriginalQuality] = useState(loadOriginalQuality);
   const [bottomNavVisible, setBottomNavVisible] = useState(true);
   const [remotePages, setRemotePages] = useState<ComicPage[] | null>(null);
   const [pageState, setPageState] = useState<PageState>(book.pages.length > 0 ? "ready" : "loading");
@@ -390,15 +396,32 @@ export function Reader({
           <Plus size={16} />
         </label>
 
-        <button
-          className={`toggleButton ${spreadEnabled ? "active" : ""}`}
-          onClick={() => setSpreadEnabled((value) => !value)}
-          title="Spread"
-          type="button"
-        >
-          <Columns2 size={17} />
-          양면
-        </button>
+        <div className="readerToggles">
+          <button
+            className={`toggleButton ${spreadEnabled ? "active" : ""}`}
+            onClick={() => setSpreadEnabled((value) => !value)}
+            title="Spread"
+            type="button"
+          >
+            <Columns2 size={17} />
+            양면
+          </button>
+
+          <button
+            aria-pressed={originalQuality}
+            className={`toggleButton ${originalQuality ? "active" : ""}`}
+            onClick={() => {
+              const next = !originalQuality;
+              saveOriginalQuality(next);
+              setOriginalQuality(next);
+            }}
+            title="원본 화질 (데이터 사용량 증가)"
+            type="button"
+          >
+            <ImageIcon size={17} />
+            원본 화질
+          </button>
+        </div>
       </div>
 
       <div
@@ -438,7 +461,7 @@ export function Reader({
                 className="webtoonPage"
                 height={page.height}
                 loading={page.index === 0 ? "eager" : "lazy"}
-                src={appUrl(page.src)}
+                src={appUrl(originalQuality ? `${page.src}?quality=original` : page.src)}
                 unoptimized
                 width={page.width}
               />
@@ -460,7 +483,7 @@ export function Reader({
                 height={page.height}
                 key={page.index}
                 loading="eager"
-                src={appUrl(page.src)}
+                src={appUrl(originalQuality ? `${page.src}?quality=original` : page.src)}
                 unoptimized
                 width={page.width}
               />
