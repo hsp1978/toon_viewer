@@ -262,7 +262,7 @@ function normalizeLibrary(record: UnknownRecord): Library {
   };
 }
 
-function normalizeSeries(record: UnknownRecord, books: Book[], includeBookIds = false): Series {
+function normalizeSeries(record: UnknownRecord): Series {
   const metadata = getNestedRecord(record, "metadata") ?? {};
   const id = getString(record.id, crypto.randomUUID());
   const libraryId = getString(record.libraryId, getString(record.library?.toString(), "komga"));
@@ -272,22 +272,17 @@ function normalizeSeries(record: UnknownRecord, books: Book[], includeBookIds = 
     ...getStringArray(metadata.genres),
     ...getStringArray(record.tags),
   ];
-  const seriesBooks = books.filter((book) => book.seriesId === id);
-  const bookIds = seriesBooks.map((book) => book.id);
-  const completedBookCount = seriesBooks.filter((book) => book.progress >= 100).length;
-  const progress =
-    seriesBooks.length > 0
-      ? Math.min(100, Math.max(0, Math.round(seriesBooks.reduce((sum, book) => sum + book.progress, 0) / seriesBooks.length)))
-      : 0;
-  const complete = bookIds.length > 0 && completedBookCount === bookIds.length;
-  const reading = seriesBooks.some((book) => book.progress > 0 && book.progress < 100);
-  const primaryBook =
-    seriesBooks.find((book) => book.progress > 0 && book.progress < 100) ??
-    seriesBooks.find((book) => book.progress < 100) ??
-    seriesBooks[0];
-  const bookCount = getNumber(record.booksCount, seriesBooks.length);
+  // Komga already aggregates read state per series. The shelf used to derive
+  // it from the full book list, which meant paging every book in the library
+  // on each home load (21k books: ~1s, and silently truncated at
+  // KOMGA_MAX_LIST_PAGES). Per-book detail is loaded when a series is opened.
+  const bookCount = getNumber(record.booksCount, 0);
+  const completedBookCount = getNumber(record.booksReadCount, 0);
+  const inProgressCount = getNumber(record.booksInProgressCount, 0);
+  const complete = bookCount > 0 && completedBookCount >= bookCount;
+  const reading = !complete && inProgressCount > 0;
+  const progress = bookCount > 0 ? Math.min(100, Math.max(0, Math.round((completedBookCount / bookCount) * 100))) : 0;
   const updatedAt = getLatestDateString([
-    ...seriesBooks.map((book) => book.updatedAt),
     getString(record.lastModified),
     getString(record.fileLastModified),
     getString(record.created),
@@ -304,11 +299,10 @@ function normalizeSeries(record: UnknownRecord, books: Book[], includeBookIds = 
     ended: getString(metadata.status) === "ENDED",
     tags,
     coverSrc: `/api/komga/series/${encodeURIComponent(id)}/thumbnail`,
-    bookIds: includeBookIds ? bookIds : [],
+    bookIds: [],
     bookCount,
     completedBookCount,
     progress,
-    primaryBookId: primaryBook?.id,
     updatedAt,
     readingDirection: getReadingDirection(metadata.readingDirection ?? record.readingDirection),
   };
@@ -351,27 +345,25 @@ function normalizeBook(record: UnknownRecord, pages: ComicPage[]): Book {
   };
 }
 
-function attachCounts(libraries: Library[], series: Series[], books: Book[]) {
+function attachCounts(libraries: Library[], series: Series[]) {
   return libraries.map((library) => {
     const librarySeries = series.filter((item) => item.libraryId === library.id);
     const libraryBookCount = librarySeries.reduce((count, item) => count + item.bookCount, 0);
     return {
       ...library,
       seriesCount: library.seriesCount || librarySeries.length,
-      bookCount: library.bookCount || libraryBookCount || books.length,
+      bookCount: library.bookCount || libraryBookCount,
     };
   });
 }
 
 async function getKomgaCatalogOverview(config: KomgaConfig): Promise<CatalogOverview> {
   const libraryRecords = await getJson("/api/v1/libraries", config).then(getContentArray);
-  const rawBooks = await getBookRecords(config);
-  const books = rawBooks.map((record) => normalizeBook(record, []));
   // Komga keeps a deleted series in its trash until the trash is emptied, so
   // a series whose files are gone would otherwise linger in the catalog.
   const seriesRecords = (await getSeriesRecords(config)).filter((record) => record.deleted !== true);
-  const series = seriesRecords.map((record) => normalizeSeries(record, books));
-  const libraries = attachCounts(libraryRecords.map(normalizeLibrary), series, books);
+  const series = seriesRecords.map((record) => normalizeSeries(record));
+  const libraries = attachCounts(libraryRecords.map(normalizeLibrary), series);
 
   return { libraries, series };
 }
